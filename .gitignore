@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local config / secrets
+.env
+.env.local
+
+# Models are downloaded, not committed (35 MB)
+models/*
+!models/.gitkeep
+
+# Runtime output
+data/
+logs/
+dist/
+*.jsonl
+metrics.json
+*.mp4
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

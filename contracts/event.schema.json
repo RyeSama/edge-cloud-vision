@@ -1,0 +1,208 @@
+{
+  "$defs": {
+    "GateDecision": {
+      "enum": [
+        "accept",
+        "review"
+      ],
+      "title": "GateDecision",
+      "type": "string"
+    },
+    "GateInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/GateDecision"
+        },
+        "reason": {
+          "$ref": "#/$defs/GateReason"
+        },
+        "accept_threshold": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Accept Threshold",
+          "type": "number"
+        },
+        "review_threshold": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Review Threshold",
+          "type": "number"
+        }
+      },
+      "required": [
+        "decision",
+        "reason",
+        "accept_threshold",
+        "review_threshold"
+      ],
+      "title": "GateInfo",
+      "type": "object"
+    },
+    "GateReason": {
+      "enum": [
+        "high_confidence",
+        "ambiguous",
+        "low_confidence"
+      ],
+      "title": "GateReason",
+      "type": "string"
+    },
+    "InferenceInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "label_id": {
+          "minimum": 0,
+          "title": "Label Id",
+          "type": "integer"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "latency_ms": {
+          "minimum": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "top_k": {
+          "items": {
+            "$ref": "#/$defs/TopK"
+          },
+          "maxItems": 5,
+          "title": "Top K",
+          "type": "array"
+        }
+      },
+      "required": [
+        "model",
+        "label",
+        "label_id",
+        "confidence",
+        "latency_ms"
+      ],
+      "title": "InferenceInfo",
+      "type": "object"
+    },
+    "SourceInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 7680,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 4320,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "maximum": 240,
+          "title": "Fps",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "fps"
+      ],
+      "title": "SourceInfo",
+      "type": "object"
+    },
+    "TopK": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "confidence"
+      ],
+      "title": "TopK",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A single edge observation.\n\n``seq`` is monotonic per device and lets the cloud detect gaps/dedup after\nreconnects. ``event_id`` is globally unique for idempotent processing.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "device_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.:-]+$",
+      "title": "Device Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceInfo"
+    },
+    "inference": {
+      "$ref": "#/$defs/InferenceInfo"
+    },
+    "gate": {
+      "$ref": "#/$defs/GateInfo"
+    }
+  },
+  "required": [
+    "device_id",
+    "seq",
+    "source",
+    "inference",
+    "gate",
+    "event_id",
+    "ts",
+    "schema_version"
+  ],
+  "title": "Event",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

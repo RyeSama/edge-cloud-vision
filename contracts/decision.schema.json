@@ -1,0 +1,67 @@
+{
+  "additionalProperties": false,
+  "description": "Cloud-side decision. ``source`` makes degradation observable.",
+  "properties": {
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "risk_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "unknown"
+      ],
+      "title": "Risk Level",
+      "type": "string"
+    },
+    "action": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Action",
+      "type": "string"
+    },
+    "rationale": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Rationale",
+      "type": "string"
+    },
+    "source": {
+      "enum": [
+        "llm",
+        "rule_fallback"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "latency_ms": {
+      "minimum": 0.0,
+      "title": "Latency Ms",
+      "type": "number"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_id",
+    "risk_level",
+    "action",
+    "rationale",
+    "source",
+    "model",
+    "latency_ms",
+    "created_at"
+  ],
+  "title": "Decision",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,18 @@
+{
+  "frames": 1000,
+  "accepted": 0,
+  "review": 1000,
+  "elapsed_s": 66.594,
+  "fps": 15.02,
+  "configured_fps": 15.0,
+  "json_payload_bytes": 563944,
+  "raw_rgb_equivalent_bytes": 230400000,
+  "jpeg_15kb_reference_bytes": 15000000,
+  "reduction_vs_raw_rgb": 0.997552,
+  "reduction_vs_jpeg_15kb": 0.962404,
+  "transport": {
+    "connected": true,
+    "published": 1000,
+    "payload_bytes": 563944
+  }
+}
