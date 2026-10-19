@@ -32,6 +32,8 @@ class FakeSubscriber:
 def _client(monkeypatch) -> TestClient:
     monkeypatch.setattr(main, "MqttEventSubscriber", FakeSubscriber)
     monkeypatch.setenv("ECV_LLM_API_KEY", "")
+    monkeypatch.setenv("ECV_MEMORY_DB_PATH", ":memory:")
+    monkeypatch.setenv("ECV_MEMORY_AUTO_COMPRESS", "0")
     return TestClient(main.app)
 
 
@@ -85,3 +87,30 @@ def test_raw_image_field_is_rejected(monkeypatch):
         payload = make_event().model_dump(mode="json")
         payload["image_b64"] = "AAAA"
         assert client.post("/api/v1/events", json=payload).status_code == 422
+
+
+def test_memory_api_ingests_queries_and_compresses(monkeypatch):
+    with _client(monkeypatch) as client:
+        event = make_event(confidence=0.95)
+        assert client.post("/api/v1/events", json=event.model_dump(mode="json")).status_code == 202
+
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            stats = client.get("/api/v1/memory/stats").json()
+            if stats["events"] == 1:
+                break
+            time.sleep(0.02)
+        assert stats["events"] == 1
+
+        response = client.post(
+            "/api/v1/memory/query",
+            json={"question": "过去 1 小时 person", "limit": 5, "format": "json"},
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["items"]
+        assert result["context"]["format"] == "json"
+
+        report = client.post("/api/v1/memory/compress", json={})
+        assert report.status_code == 200
+        assert report.json()["errors"] == []

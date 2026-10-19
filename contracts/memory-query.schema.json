@@ -1,0 +1,85 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
+    "limit": {
+      "default": 10,
+      "maximum": 50,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+    },
+    "token_budget": {
+      "default": 4000,
+      "maximum": 8000,
+      "minimum": 128,
+      "title": "Token Budget",
+      "type": "integer"
+    },
+    "device_id": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Device Id"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "format": {
+      "default": "auto",
+      "enum": [
+        "auto",
+        "markdown",
+        "json"
+      ],
+      "title": "Format",
+      "type": "string"
+    },
+    "now": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Now"
+    },
+    "compress": {
+      "default": true,
+      "title": "Compress",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "question"
+  ],
+  "title": "MemoryQuery",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

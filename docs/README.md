@@ -5,6 +5,7 @@
 | 文档 | 回答什么问题 |
 |---|---|
 | [architecture.md](architecture.md) | 模块怎么分层？线程/异步模型是什么？故障时会发生什么？怎么迁到 C++/MCU？ |
+| [edge-mem.md](edge-mem.md) | v0.2 的时间衰减、SQLite/向量混合存储、RRF 检索、Token 预算和降级 |
 | [protocol.md](protocol.md) | MQTT topic、QoS、心跳、离线缓冲、去重、错误处理的具体约定 |
 | [adr/0001-mqtt-vs-socket.md](adr/0001-mqtt-vs-socket.md) | 为什么主线选 MQTT 而不是裸 Socket/WebSocket/ZeroMQ？ |
 | [measurements/README.md](measurements/README.md) | 1000 帧带宽实验的口径、命令和原始结果 |
@@ -16,6 +17,7 @@
 2. **低置信度不静默丢弃。** `>= 0.90` accept；`0.50–0.90` review(ambiguous)；`< 0.50` review(low_confidence)。工业场景里“模型没见过”本身可能是风险。
 3. **LLM 失败必须可见。** 未配置 Key、超时、非法 JSON 都降级为 `rule_fallback / unknown / request_human_review`，并在 `/healthz` 和 `/metrics` 里留下计数，不假装成功。
 4. **带宽数字必须带基线。** 同时报告相对原始 RGB 和相对 15 KB/帧 MJPEG 的降幅；只统计 MQTT payload，不含 TCP/TLS 固定头。
+5. **记忆检索必须可降级。** 时间窗先做 SQLite 硬过滤；向量检索失败回退文本查询并标记 `degraded`；没有 LLM 时返回 JSON 时间轴，而不是 500。
 
 ## 复现实验
 
@@ -40,4 +42,5 @@ python -m ecvision.edge --source synthetic --max-frames 100
 ## 已知限制
 
 见根 README 的“已知限制”一节。最重要的三条：模型是通用 ImageNet 分类器而非工业专用模型；
-云端事件库是进程内存；端侧离线缓冲在进程崩溃时会丢。写文档时不要把这些说成已解决。
+v0.1 的即时事件视图是进程内存（v0.2 Edge-Mem 已持久化到 SQLite）；端侧离线缓冲在进程崩溃时会丢。
+写文档时不要把这些说成已解决。

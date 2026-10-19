@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "ContextBundle": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "markdown",
+            "json"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "token_count": {
+          "minimum": 0,
+          "title": "Token Count",
+          "type": "integer"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "item_count": {
+          "minimum": 0,
+          "title": "Item Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "text",
+        "token_count",
+        "truncated",
+        "item_count"
+      ],
+      "title": "ContextBundle",
+      "type": "object"
+    },
+    "MemoryItem": {
+      "additionalProperties": false,
+      "description": "One retrieval candidate.\n\n``text`` is what goes into the context window. Raw event JSON is not\nembedded here, so a query response cannot accidentally leak pixels.",
+      "properties": {
+        "event_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "device_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "tier": {
+          "$ref": "#/$defs/MemoryTier"
+        },
+        "summary_count": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Summary Count",
+          "type": "integer"
+        },
+        "risk_level": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Risk Level"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "text": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "score": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        },
+        "time_rank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Rank"
+        },
+        "semantic_rank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Rank"
+        }
+      },
+      "required": [
+        "event_id",
+        "device_id",
+        "ts",
+        "label",
+        "confidence",
+        "tier",
+        "text"
+      ],
+      "title": "MemoryItem",
+      "type": "object"
+    },
+    "MemoryTier": {
+      "enum": [
+        "hot",
+        "warm",
+        "cold"
+      ],
+      "title": "MemoryTier",
+      "type": "string"
+    },
+    "TimeWindow": {
+      "additionalProperties": false,
+      "description": "A half-open UTC window ``[start, end)`` plus a human-readable label.",
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "source": {
+          "default": "relative",
+          "enum": [
+            "explicit",
+            "relative",
+            "fallback"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "label"
+      ],
+      "title": "TimeWindow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "title": "Question",
+      "type": "string"
+    },
+    "window": {
+      "$ref": "#/$defs/TimeWindow"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/MemoryItem"
+      },
+      "maxItems": 50,
+      "title": "Items",
+      "type": "array"
+    },
+    "context": {
+      "$ref": "#/$defs/ContextBundle"
+    },
+    "degraded": {
+      "title": "Degraded",
+      "type": "boolean"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Warnings",
+      "type": "array"
+    },
+    "total_candidates": {
+      "minimum": 0,
+      "title": "Total Candidates",
+      "type": "integer"
+    },
+    "retrieval_ms": {
+      "minimum": 0.0,
+      "title": "Retrieval Ms",
+      "type": "number"
+    }
+  },
+  "required": [
+    "question",
+    "window",
+    "context",
+    "degraded",
+    "total_candidates",
+    "retrieval_ms"
+  ],
+  "title": "MemoryQueryResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

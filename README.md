@@ -5,9 +5,11 @@
 一个可以用普通 PC 完整跑通、但按真实嵌入式物联网约束设计的开源原型。
 
 > 端侧先做一次"便宜"的判断，只把结构化 JSON 送上云；只有端侧拿不准的样本，才触发边缘大模型兜底。全链路不传输一帧原始图像。
+>
+> v0.2.0 新增 **Edge-Mem**：把事件按时间衰减分层存储，并提供“时间硬过滤 + 语义向量 + RRF 融合”的混合检索，让网关能回答“昨天下午那个穿红衣服的人是什么时候出现的？”
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-25%20passed-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-33%20passed-brightgreen.svg)](tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -21,11 +23,12 @@
 - 云端多模态大模型单次调用有延迟和费用，不可能对每一帧都调用；
 - 小模型在模糊、遮挡、未知物体上会给出中等置信度，直接丢弃可能漏掉安全风险。
 
-这个项目用一条完整的端到端链路回答三个问题：
+这个项目用一条完整的端到端链路回答四个问题：
 
 1. **端侧能先过滤掉多少？** 低分辨率采集 + INT8 量化模型，高置信度结果直接生成事件。
 2. **过滤不掉的怎么办？** 中等和低置信度样本进入复核，由边缘侧 LLM 做语义判断。
 3. **凭什么说省带宽？** 只传结构化 JSON，并用真实帧数同时核算原始 RGB 和 MJPEG 两个基线。
+4. **过去发生了什么？** Edge-Mem 把事件按时间衰减分层，用“时间硬过滤 + 语义检索 + RRF”回答自然语言时间问题。
 
 ### 适合谁
 
@@ -96,6 +99,26 @@ source     = rule_fallback
 
 降级结果会写入事件记录，并通过 `/healthz`、`/metrics` 暴露出来。
 
+### Edge-Mem：时间感知的记忆层
+
+v0.2.0 在云端事件落库之后增加了一层“可检索记忆”：
+
+```text
+hot    最近 10 分钟       完整事件明细           SQLite + 向量
+warm   10 分钟 – 2 小时    15 分钟聚合摘要        SQLite + 摘要向量
+cold   2 小时以上         极简索引，raw 已删除    仅 SQLite 时间过滤
+```
+
+查询时先用正则/轻量 NLP 解析时间窗，在 SQLite 做硬过滤，再在候选集内做向量检索，最后用 **RRF（Reciprocal Rank Fusion）** 融合时间排名与语义排名。向量库失败会降级为 SQLite 文本查询并标记 `degraded`；没有 LLM 时返回 `json_timeline` 而不是报错。
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"昨天下午穿红衣服的人是什么时候出现的？","limit":10,"format":"markdown"}'
+```
+
+细节、公式和配置见 [`docs/edge-mem.md`](docs/edge-mem.md)。
+
 ---
 
 ## 系统架构
@@ -116,9 +139,17 @@ source     = rule_fallback
                                         │
 ┌───────────────────────────────────────▼──────────────────────────────────────┐
 │ 边缘网关  FastAPI                                                            │
-│  订阅 → Pydantic 校验 → 内存事件库 → 仅 review 事件调用 LLM                   │
+│  订阅 → Pydantic 校验 → 内存即时视图 → 仅 review 事件调用 LLM           │
 │  LLM 失败 → rule_fallback：unknown + request_human_review                    │
 │  REST：/healthz  /api/v1/events  /metrics                                    │
+└───────────────────────────────────────┬──────────────────────────────────────┘
+                                        │
+┌───────────────────────────────────────▼──────────────────────────────────────┐
+│ Edge-Mem 记忆层                                                              │
+│  SQLite：hot 明细 / warm 摘要 / cold 极简索引                                 │
+│  时间解析 → 硬过滤 → 时间排名 + 向量排名 → RRF → Token 预算上下文             │
+│  向量失败 → SQLite 文本回退（degraded）   LLM 未配置 → JSON 时间轴            │
+│  REST：/api/v1/memory/query  /ask  /compress  /stats                         │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -135,6 +166,7 @@ source     = rule_fallback
 | 端侧推理 | Python 3.10+、OpenCV、ai-edge-litert / TFLite Runtime |
 | 通信 | MQTT 3.1.1、paho-mqtt、QoS 1、LWT |
 | 边缘网关 | FastAPI、Pydantic、httpx、OpenAI 兼容接口 |
+| Edge-Mem | SQLite（WAL）、向量索引 Protocol、RRF、可选 Chroma |
 | 测试与 CI | pytest、ruff、GitHub Actions（Python 3.10 / 3.12） |
 
 ---
@@ -158,7 +190,7 @@ edge-cloud-vision/
 │  │  ├─ base.py                #   EventPublisher Protocol + JSON 编码 + DryRun
 │  │  ├─ topics.py              #   topic 约定与解析
 │  │  └─ mqtt.py                #   paho 发布端：LWT/心跳/重连/离线缓冲
-│  └─ cloud/                    # 边缘网关
+│  ├─ cloud/                    # 边缘网关
 │     ├─ subscriber.py          #   MQTT 线程 → asyncio 队列
 │     ├─ decision.py            #   LLM 调用 + 严格解析 + 保守降级
 │     ├─ prompts.py             #   只喂结构化字段的 Prompt
@@ -166,13 +198,25 @@ edge-cloud-vision/
 │     ├─ settings.py            #   环境变量
 │     ├─ main.py                #   FastAPI 应用与 REST/metrics
 │     └─ __main__.py            #   uvicorn 启动入口
+│  └─ memory/                   # v0.2 Edge-Mem：时间衰减 + 混合检索
+│     ├─ models.py              #   严格契约：MemoryItem/TimeWindow/QueryResult
+│     ├─ repository.py          #   SQLite：events / summaries / cold_events
+│     ├─ vector.py              #   VectorIndex Protocol + 内存/Chroma 适配器
+│     ├─ embedder.py            #   Embedder Protocol + 确定性哈希向量
+│     ├─ timeparse.py           #   中文日期/相对时间/时段 → 时间窗
+│     ├─ compression.py         #   hot → warm 聚合、warm/cold 归档
+│     ├─ retriever.py           #   时间+语义召回、RRF、降级
+│     ├─ context.py             #   Markdown/JSON 时间轴 + Token 预算
+│     ├─ answer.py              #   可选 LLM 回答（OpenAI 兼容）
+│     └─ service.py             #   编排：入库、查询、压缩、统计
 ├─ examples/minimal_loop.py     # 一屏版端侧骨架：采集→推理→门限→JSON
 ├─ .github/workflows/ci.yml     # GitHub Actions：ruff + pytest
-├─ tests/                       # 25 个单元/接口测试
+├─ tests/                       # 33 个单元/接口测试
 ├─ scripts/download_model.py    # 下载并校验 MobileNetV1 INT8 + ImageNet labels
+├─ scripts/bench_memory.py      # Edge-Mem 微基准（压缩 + 查询延迟）
 ├─ contracts/                   # 语言无关 JSON Schema
 ├─ deploy/mosquitto/            # 本地 broker 配置
-├─ docs/                        # 协议、架构说明、ADR
+├─ docs/                        # 协议、架构说明、ADR、Edge-Mem
 ├─ models/                      # 下载的 .tflite / labels.txt，git 忽略
 ├─ docker-compose.yml           # 一条命令起 Mosquitto
 ├─ pyproject.toml
@@ -263,6 +307,31 @@ python -m ecvision.cloud
 
 > LLM 客户端显式设置 `trust_env=False`，不读取系统的 `HTTP_PROXY/NO_PROXY`。原因是 Windows 上常见的 `NO_PROXY=...,[::1]` 会让 httpx 0.28 在构造客户端时抛 `InvalidURL: Invalid port ':1]'`。需要代理时设置 `ECV_LLM_PROXY=http://127.0.0.1:7890`。
 
+默认使用内存向量索引，不需要额外依赖；想用 Chroma 持久化：
+
+```bash
+pip install -e ".[memory]"
+# .env 里设置 ECV_MEMORY_VECTOR_BACKEND=chroma
+```
+
+### 试用 Edge-Mem
+
+网关启动后，端侧事件会自动进入 SQLite。先注入一条事件，再查记忆：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/events \
+  -H 'Content-Type: application/json' \
+  -d @docs/examples/review-event.json
+
+curl http://127.0.0.1:8000/api/v1/memory/stats
+
+curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"过去 1 小时有哪些人？","limit":5,"format":"markdown"}'
+```
+
+`/api/v1/memory/ask` 在未配置 LLM 时返回 `mode="json_timeline"`；配置 LLM 后返回 `mode="llm"`。完整说明见 [`docs/edge-mem.md`](docs/edge-mem.md)。
+
 ### 端到端联调
 
 终端 1：
@@ -318,6 +387,10 @@ cat data/metrics.json
 | MQTT 断开 | 有界缓冲，默认 500 条；paho 1–30 s 退避重连 | `stats.buffered` / `dropped` |
 | 端侧进程崩溃 | Broker 发布 retained `offline` 遗嘱 | `status` topic |
 | 云端队列满 | 丢弃并计数，不阻塞 MQTT 回调 | `ecv_events_dropped_total` |
+| 向量库检索失败 | 回退 SQLite 文本/标签过滤，`degraded=true` | `/api/v1/memory/*.warnings`、`last_vector_error` |
+| Chroma 未安装/初始化失败 | 使用进程内向量索引，记录 warning | `/healthz.memory_warnings` |
+| Edge-Mem SQLite 初始化失败 | v0.1 事件主链路继续，memory API 返回 503 | `/healthz.memory_error` |
+| LLM 未配置（记忆问答） | 返回 `json_timeline`，保留检索时间轴 | `/api/v1/memory/ask.mode` |
 
 **为什么低置信度不丢弃？** 安全场景里，"没看见"比"多调用一次 LLM"更贵。`< 0.50` 被显式标记为 `low_confidence` 并进入人工/LLM 复核，这个策略有单元测试覆盖。
 
@@ -347,6 +420,10 @@ python -m ecvision.edge --source samples/warehouse.mp4 --max-frames 1000 \
 
 取 `metrics.json` 里的 `json_payload_bytes` 与 `raw_rgb_equivalent_bytes` / `jpeg_15kb_reference_bytes`，同时报告两个降幅。带宽结论只统计应用层 payload，不含 TCP/TLS/MQTT 固定头。
 
+Edge-Mem 的微基准（[`docs/measurements/edge-mem.json`](docs/measurements/edge-mem.json)，1000 条事件、3 小时、5 类标签、2 台设备）：
+`ingest` 2.62 s，`compress` 1.14 s；压缩后 hot 56 / warm 64 / cold 333，向量 120 条；查询 p50 2.94 ms、p95 5.36 ms，候选 87 条，返回 10 条，上下文 509 tokens，无截断。
+这是单机微基准，不是生产容量结论；它只说明默认离线实现能在毫秒级完成一次“时间过滤 + 向量召回 + RRF + 上下文组装”。
+
 ---
 
 ## 测试
@@ -363,8 +440,9 @@ python -m compileall -q src tests
 - 预处理：中心裁剪保持比例、BGR→RGB 通道正确；
 - 管线：假采集器 + 假分类器 → 事件字段、指标；
 - 云端：无 Key 不联网、保守降级、代码围栏 JSON 解析、非法 risk 拒绝；
-- API：注入 review 事件 → 保守决策；重复 `event_id` 幂等且不重复调用 LLM；携带 `image_b64` 返回 422；
-- topic：发布/订阅解析、错误层级拒绝。
+- API：注入 review 事件 → 保守决策；重复 `event_id` 幂等且不重复调用 LLM；携带 `image_b64` 返回 422；memory 入库→查询→压缩；
+- topic：发布/订阅解析、错误层级拒绝；
+- Edge-Mem：时间衰减三层边界、中文时间窗解析、RRF 融合、Token 截断、向量失败降级、无 LLM 的 JSON 时间轴。
 
 GitHub Actions 在 Python 3.10 和 3.12 上执行 `ruff check` 与 `pytest -q`。
 
@@ -373,7 +451,10 @@ GitHub Actions 在 Python 3.10 和 3.12 上执行 `ruff check` 与 `pytest -q`�
 ## 已知限制
 
 - 当前模型是通用 ImageNet MobileNetV1，不是工业缺陷/安全场景专用模型；演示的是架构，不是识别精度。
-- 事件库是进程内有界存储，重启即丢；生产应换 SQLite/ClickHouse/TSDB。
+- v0.1 的 `/api/v1/events` 即时视图仍是有界进程内存储；v0.2 的 Edge-Mem 已把事件持久化到 SQLite，但默认向量索引是进程内的，重启后从 SQLite 重建。
+- Edge-Mem 的哈希 embedding 不是语义模型；它保证离线可跑和测试可复现，真实语义检索应替换 `Embedder` 实现。
+- 时间解析只覆盖项目会遇到的中文日期/相对时间/时段表达，不是通用 NLP；无法识别时回退最近 24 小时并标记 `fallback`。
+- 压缩是破坏性的：warm/cold 的 raw 行会被删除。需要完整审计时，应在压缩前落对象存储或数据湖。
 - 单消费者串行调用 LLM，换取背压和简单的限流；高并发需要 worker pool + 按设备保序。
 - 未实现设备鉴权。MQTT 用户名密码/TLS 只留了配置位，`POST /api/v1/events` 是本地测试钩子。
 - `metrics` 只统计应用层 payload，不含 TCP/TLS/MQTT 固定头；带宽结论已按此口径标注。

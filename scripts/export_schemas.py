@@ -18,6 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from ecvision.contracts import Decision, Event
+from ecvision.memory.models import MemoryQuery, MemoryQueryResult
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS_DIR = ROOT / "contracts"
@@ -39,6 +40,8 @@ def main() -> int:
     CONTRACTS_DIR.mkdir(parents=True, exist_ok=True)
     export(Event, "event", require=("event_id", "ts", "schema_version"))
     export(Decision, "decision", require=("created_at",))
+    export(MemoryQuery, "memory-query")
+    export(MemoryQueryResult, "memory-result")
     return 0
 
 

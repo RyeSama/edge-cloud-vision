@@ -12,23 +12,27 @@
         │ preprocess       │          │ store              │
         │ classifier       │          │ decision ──► LLM   │
         │ gate             │          │ main (FastAPI)     │
-        │ metrics          │          │                    │
-        │ pipeline ────────┼──┐       │                    │
-        └──────────────────┘  │       └────────────────────┘
-                              │                 ▲
-                     EventPublisher             │
-                     (Protocol)                 │
-                  ┌───────────┴───────┐         │
-                  │ DryRunPublisher   │         │
-                  │ MqttPublisher ────┼── MQTT ─┘
+        │ metrics          │          │   │                │
+        │ pipeline ────────┼──┐       │   ▼                │
+        └──────────────────┘  │       │ memory (Edge-Mem)  │
+                              │       │  repository(SQLite)│
+                     EventPublisher   │  vector index      │
+                     (Protocol)       │  retriever / RRF   │
+                  ┌───────────┴───────┐│  context builder   │
+                  │ DryRunPublisher   ││  answerer ──► LLM  │
+                  │ MqttPublisher ────┼┴─ MQTT ────────────┘
                   └───────────────────┘
 ```
 
 规则：
 
 - `edge` 不 import `cloud`，`cloud` 不 import `edge`；共享的只有 `contracts`。
+- `memory` 只 import `contracts` 和自身 Protocol，不 import `cloud`；`cloud.main` 负责把
+  `CloudSettings` 结构化传给 `MemoryService.from_settings`，方向是 cloud → memory。
 - `pipeline` 只依赖 `FrameSource` / `Classifier` / `EventPublisher` 三个 Protocol。
 - `cloud.decision` 只依赖 `Event` / `Settings` / `httpx`，可以脱离 FastAPI 单测。
+- `memory` 的存储和检索都通过 `EventRepository` / `VectorIndex` / `Embedder` /
+  `Answerer` Protocol 注入；默认实现可离线跑，Chroma 是可选适配器。
 
 ## 2. 运行时序（正常路径）
 
@@ -43,8 +47,9 @@ Edge                Broker                  Cloud
  │ PUB event (QoS1)   │                       │
  ├───────────────────►│──────────────────────►│ validate
  │                    │                       │ store.add
+ │                    │                       │ memory.ingest
  │                    │                       │ if review: LLM
- │                    │                       │ attach decision
+ │                    │                       │ memory.attach_decision
  │ PUB status (10s)   │                       │
  ├───────────────────►│                       │
  │ ×  crash           │                       │
@@ -92,7 +97,10 @@ Edge process                          Cloud process
 | 端侧进程崩溃 | Broker LWT | 重启后重新连接 | 内存缓冲丢失（未持久化） |
 | 网络闪断 | paho keepalive | 1–30 s 退避重连 | 缓冲内事件补发 |
 | Broker 重启 | paho 断开回调 | 自动重连 | 端侧缓冲补发；Broker 持久化 + session 未过期时云端队列也可补发 |
-| 云端重启 | — | 重新订阅；内存库清空 | **事件库丢失**（已知限制） |
+| 云端重启 | — | 重新订阅；v0.1 即时视图清空，Edge-Mem 从 SQLite 恢复 | v0.1 即时视图丢失；Edge-Mem 事件保留 |
+| Edge-Mem SQLite 初始化失败 | exception | memory API 返回 503，v0.1 主链路继续 | 记忆不可用，事件仍可接收 |
+| 向量索引失败 | exception | 回退 SQLite 文本查询，`degraded=true` | 召回率下降，不丢事件 |
+| 压缩期间崩溃 | 启动时按时间重跑 | 幂等 upsert / 已删除 raw 不再处理 | warm/cold 可能重复摘要，不会丢热数据 |
 | LLM 超时 | httpx timeout | 下一次请求重试 | 当前事件降级为人工复核 |
 | LLM 限流 429 | HTTPStatusError | 不重试，降级 | 计数 fallback |
 | 队列满 | `QueueFull` | 丢弃最晚到达的事件 | 计数 dropped |

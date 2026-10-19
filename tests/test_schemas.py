@@ -13,6 +13,9 @@ from tests.helpers import make_event
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((ROOT / "contracts" / "event.schema.json").read_text(encoding="utf-8"))
+MEMORY_QUERY_SCHEMA = json.loads(
+    (ROOT / "contracts" / "memory-query.schema.json").read_text(encoding="utf-8")
+)
 
 
 def test_generated_schema_matches_runtime_payload():
@@ -30,3 +33,11 @@ def test_schema_rejects_extra_image_field():
     payload["image_b64"] = "AAAA"
     with pytest.raises(ValidationError):
         Draft202012Validator(SCHEMA).validate(payload)
+
+
+def test_memory_query_schema_accepts_a_question_and_rejects_extras():
+    payload = {"question": "过去 1 小时有哪些人？", "limit": 5}
+    Draft202012Validator(MEMORY_QUERY_SCHEMA).validate(payload)
+    payload["image_b64"] = "AAAA"
+    with pytest.raises(ValidationError):
+        Draft202012Validator(MEMORY_QUERY_SCHEMA).validate(payload)
