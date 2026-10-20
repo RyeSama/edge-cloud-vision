@@ -1,27 +1,62 @@
 # Edge-Cloud Vision System
 
-端云协同的视觉识别原型。端侧用 TFLite 跑一个轻量模型，把识别结果通过 MQTT 发给网关；网关只在端侧拿不准时调用 LLM。原始图像不离开设备。
+端侧用 TFLite 跑一个轻量模型，把识别结果通过 MQTT 发给网关；网关收到后，高置信度直接记录，拿不准的才调用 LLM。图像不出设备。
 
-这个项目最早是想验证一个很具体的问题：在算力和带宽都受限的场景里，能不能让端侧先做一次便宜的判断，只把少量结构化结果送上云，而不是把视频一直往上推。
+这个项目最早是想验证一个很具体的问题：在算力和带宽都受限的场景里，能不能让端侧先做一次便宜的判断，只把少量结构化结果送上云，而不是把视频一直往上推。现在的代码是 Python 参考实现，重点在结构、时序和测量，不在识别精度。当前版本 v0.4.0。
 
-当前版本是 v0.4.0。除了端侧过滤和云端兜底，还加了事件记忆、采样时间链、置信度标定、Modbus 联锁和一套离线验收脚本。代码是 Python 参考实现，目标是把结构跑通、把指标测出来，不是直接上产线。
+做到后面发现，识别本身不是最难的。更难的是回答：这条结果是什么时候产生的、延迟到底是多少、置信度能不能当概率用、出错时系统往哪边倒。v0.3 和 v0.4 基本都在补这些问题。
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Tests](https://img.shields.io/badge/tests-65%20passed-brightgreen.svg)](tests)
 [![Release](https://img.shields.io/badge/release-v0.4.0-blue.svg)](https://github.com/RyeSama/edge-cloud-vision/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 它现在能做什么
+## 现在能做什么
 
-端侧支持摄像头、视频文件和合成源，统一采集 320×240，跑 MobileNetV1 INT8，输出一条通常不到 1 KB 的 JSON。置信度 `>= 0.90` 直接接受；`0.50–0.90` 标成 `ambiguous`；`< 0.50` 标成 `low_confidence`。后两档都会进入复核，不会静默丢掉。
+端侧支持摄像头、视频文件和合成源，统一采集 320×240，跑 MobileNetV1 INT8。置信度 `>= 0.90` 直接接受，`0.50–0.90` 标成 `ambiguous`，`< 0.50` 标成 `low_confidence`。后两档都会进入复核，不会静默丢掉。
 
-通信层用 MQTT 3.1.1 + QoS 1。事件走 `ecv/v1/{device_id}/event`，状态走 `status`，`status` 是 retained 的，带 LWT 和心跳。断线时端侧会先缓冲，恢复后补发；云端按 `event_id` 去重。
+采集、推理、门限、发布各阶段都有时间戳。端侧输出的事件大概长这样：
 
-网关是 FastAPI。高置信度事件只记录；需要复核的才调用 OpenAI 兼容接口。LLM 没配、超时、返回非法 JSON，都会落到 `rule_fallback`，返回 `unknown + request_human_review`，不会让主流程崩掉。
+```json
+{
+  "schema_version": "1.1",
+  "event_id": "uuid4",
+  "device_id": "edge-cam-01",
+  "seq": 42,
+  "ts": "2026-10-19T09:30:00.123+00:00",
+  "source": {"width": 320, "height": 240, "fps": 15.0},
+  "inference": {
+    "model": "mobilenet_v1_1.0_224_quant",
+    "label": "laptop",
+    "label_id": 620,
+    "confidence": 0.62,
+    "latency_ms": 19.7,
+    "top_k": [{"label": "laptop", "confidence": 0.62}]
+  },
+  "gate": {
+    "decision": "review",
+    "reason": "ambiguous",
+    "accept_threshold": 0.9,
+    "review_threshold": 0.5
+  },
+  "sample": {
+    "capture_mono_ns": 1234567890,
+    "capture_wall_ns": 1760866200123000000,
+    "end_to_end_ms": 21.4,
+    "deadline_ms": 66.7,
+    "deadline_missed": false,
+    "clock": {"source": "ntp", "boot_id": "a1b2c3", "offset_ms": 1.2, "synced": true}
+  }
+}
+```
+
+通信层用 MQTT 3.1.1 + QoS 1。事件走 `ecv/v1/{device_id}/event`，状态走 `status`，`status` 是 retained 的，带 LWT 和心跳。断线时端侧先缓冲，恢复后补发；云端按 `event_id` 去重。
+
+网关是 FastAPI。高置信度事件只记录，需要复核的才调用 OpenAI 兼容接口。LLM 没配、超时、返回非法 JSON，都会落到 `rule_fallback`，返回 `unknown + request_human_review`，主流程不会崩。
 
 事件会落进 Edge-Mem。SQLite 按时间分三层：10 分钟内保留明细，10 分钟到 2 小时聚合成摘要，2 小时以上只留极简索引。查询时先用时间窗过滤，再在候选集里做向量检索，用 RRF 合并时间排名和语义排名。向量库不可用时回退 SQLite 文本查询，没有 LLM 时返回 JSON 时间轴。
 
-v0.3 加了采样时间链、置信度标定、SPC 漂移监控、确定性激励台和 Modbus TCP 联锁。v0.4 把标定和验收接在一起：按 false-accept 预算，为 clean / blur / occlusion / lowlight / downscale 分别选 accept 门限。
+v0.3 加了采样时间链、置信度标定、SPC 漂移监控、确定性激励台和 Modbus TCP 联锁。v0.4 把标定和验收接在一起：按 false-accept 预算，为 clean / blur / occlusion / lowlight / downscale 分别选 accept 门限。离线策略和运行时门限是分开的，后者目前仍是单一阈值。
 
 ## 怎么跑
 
@@ -51,7 +86,7 @@ pip install tflite-runtime
 python scripts/download_model.py
 ```
 
-脚本会校验 SHA-256，解出 `models/mobilenet_v1_1.0_224_quant.tflite`，并生成 1001 行 labels，第 0 类补 `background`。模型约 35 MB，不进仓库。
+脚本会校验 SHA-256，解出 `models/mobilenet_v1_1.0_224_quant.tflite`，并生成 1001 行 labels，第 0 类补 `background`。下载包约 35 MB，解压后的 `.tflite` 约 4.3 MB，不进仓库。
 
 ### 3. 先跑端侧
 
@@ -61,19 +96,19 @@ python scripts/download_model.py
 python -m ecvision.edge --source synthetic --max-frames 10 --dry-run
 ```
 
-输出是一行一条紧凑 JSON。想接摄像头：
+接摄像头：
 
 ```bash
 python -m ecvision.edge --source 0 --preview
 ```
 
-想跑视频文件：
+跑视频文件：
 
 ```bash
-python -m ecvision.edge --source samples/warehouse.mp4 --loop
+python -m ecvision.edge --source path/to/your-video.mp4 --loop
 ```
 
-只想看端侧最小代码，可以看 [`examples/minimal_loop.py`](examples/minimal_loop.py)。大约 50 行，采集 → 推理 → 门限 → JSON，不依赖 MQTT 和指标模块。
+只想看端侧最小代码，可以看 [`examples/minimal_loop.py`](examples/minimal_loop.py)。大约 50 行，采集、推理、门限、JSON，不依赖 MQTT 和指标模块。
 
 ### 4. 起 broker 和网关
 
@@ -136,7 +171,7 @@ python -m ecvision.edge --source synthetic --max-frames 300 \
 
 分条件验收的完整流程在 [`docs/measurements/v0.4/README.md`](docs/measurements/v0.4/README.md)。简单说就是：先切标定/测试集，再跑 `eval_dataset.py`，用 `fit_calibration.py` 拟合温度，用 `fit_policy.py` 选门限，最后在测试集上再跑一遍 `eval_dataset.py --policy`。
 
-## 目录
+## 结构
 
 ```text
 edge-cloud-vision/
@@ -161,17 +196,17 @@ edge-cloud-vision/
 
 端侧和云端互不 import，只共享 `contracts.py` 和 `transport`。`EdgeRunner` 依赖 `FrameSource`、`Classifier`、`EventPublisher` 三个 Protocol，不直接依赖 OpenCV、TFLite 或 paho。这样换 C++/MCU 实现时，不用把整条链路重写。
 
-## 几个设计选择
+## 一些取舍
 
-**为什么用 MQTT，不用裸 Socket。** JSON 事件很小，MQTT 的固定头开销可以忽略；真正麻烦的是重连、心跳、LWT、离线队列和 ACL。这些 broker 已经做了，端侧和云端代码可以薄很多。Socket 只作为教学对照，不是主线。
+通信层用 MQTT，而不是裸 Socket。JSON 事件很小，MQTT 的固定头开销可以忽略；真正麻烦的是重连、心跳、LWT、离线队列和 ACL。这些交给 broker 之后，端侧和云端代码能薄很多。Socket 只作为教学对照，不是主线。
 
-**为什么低置信度不直接丢。** 安全场景里，“没看见”比“多调用一次 LLM”更贵。`< 0.50` 会明确标成 `low_confidence` 并进入复核，这个行为有测试覆盖。
+低置信度不直接丢。安全场景里，“没看见”比“多调用一次 LLM”更贵。`< 0.50` 会明确标成 `low_confidence` 并进入复核，这个行为有测试覆盖。
 
-**为什么事件时间用采集时间。** 发出时间会被队列、重试、网络拉长，不能代表“事情是什么时候发生的”。`Event.ts` 用采集时间，`SampleInfo` 里另存 capture / infer / emit / publish 各阶段的时间戳。
+事件时间用采集时间，不用发出时间。发出时间会被队列、重试、网络拉长，不能代表“事情是什么时候发生的”。`Event.ts` 是采集时间，`SampleInfo` 里另存 capture、infer、emit、publish 各阶段的时间戳。
 
-**为什么 SQLite 是事实源，向量库是可重建的索引。** 时间过滤、幂等、审计都靠 SQLite；向量检索失败时还能回退文本查询。默认向量实现是进程内的，重启后从 SQLite 重建。
+SQLite 是事实源，向量库是可重建的索引。时间过滤、幂等、审计都靠 SQLite；向量检索失败时还能回退文本查询。默认向量实现是进程内的，重启后从 SQLite 重建。
 
-**为什么 Modbus 输出要先过联锁。** 模型输出不是安全信号。视觉结果先进入 `InterlockController`，连续 N 帧确认、保持、stale/watchdog 都通过后才写寄存器；异常时直接 fail-safe。
+Modbus 输出要先过联锁。模型输出不是安全信号。视觉结果先进入 `InterlockController`，连续 N 帧确认、保持、stale/watchdog 都通过后才写寄存器；异常时直接 fail-safe。
 
 ## 实测
 
@@ -216,25 +251,19 @@ ruff check src tests scripts
 python -m compileall -q src tests
 ```
 
-当前 65 个测试，覆盖门限边界、契约、预处理、管线、云端降级、API 幂等、Edge-Mem 时间窗/ RRF / Token 截断、时钟偏移、ECE/Brier、conformal、SPC、Modbus 往返、联锁、事件时间和激励台。GitHub Actions 在 Python 3.10 和 3.12 上跑 `ruff check` 和 `pytest -q`。
+当前 65 个测试，覆盖门限边界、契约、预处理、管线、云端降级、API 幂等、Edge-Mem 时间窗/RRF/Token 截断、时钟偏移、ECE/Brier、conformal、SPC、Modbus 往返、联锁、事件时间和激励台。GitHub Actions 在 Python 3.10 和 3.12 上跑 `ruff check` 和 `pytest -q`。
 
-## 目前的限制
+## 限制
 
-- 模型是通用 ImageNet MobileNetV1，不是工业缺陷或安全场景专用模型。这个仓库演示的是系统结构，不是识别精度。
-- `/api/v1/events` 的即时视图还在进程内存里；Edge-Mem 已经落 SQLite，但默认向量索引是进程内的，重启后重建。
-- 哈希 embedding 不是语义模型。它保证离线可跑和测试可复现，真实语义检索需要替换 `Embedder`。
-- 时间解析只覆盖项目里会遇到的中文日期、相对时间和时段表达，不是通用 NLP。识别不了时回退最近 24 小时，并标记 `fallback`。
-- 压缩是破坏性的，warm/cold 的 raw 行会被删掉。需要完整审计时，得在压缩前落对象存储。
-- 单消费者串行调用 LLM，换来背压和简单限流。高并发要 worker pool，并按设备保序。
-- 没有设备鉴权。MQTT 用户名密码/TLS 只留了配置位，`POST /api/v1/events` 是本地测试钩子。
-- 采样时钟默认是系统时钟包装；`ntp/ptp/gps` 只是显式标记，不含真实授时驱动。
-- 标定需要自己准备工业场景的标注集。仓库提供方法和验收路径，不提供“已标定”的精度声明。
-- 温度标定是二分类校准（correct vs incorrect），不是多分类 softmax 重标定。
-- 分条件策略目前是离线验收流程。运行时 `EdgeRunner` 仍然用单一门限，除非调用方显式提供条件。
-- Modbus TCP 是纯标准库模拟从站，不是安全 PLC。联锁逻辑可以验证，但不能替代硬件安全回路。
-- 激励台默认是合成目标，`accuracy=n/a`。真实精度要用 `--source-image --ground-truth` 的现场数据。
-- SPC 是诊断信号，不是自动停线依据，阈值要按现场基线调。
-- Python 是参考实现。迁到 STM32 / ESP32 要替换采集、推理和传输适配器，门限和协议逻辑可以复用，但不是原样复制就能跑。
+模型和数据这块，MobileNetV1 是通用 ImageNet 模型，不是工业缺陷或安全场景专用模型；这组数字用来验证方法，不是识别精度。v0.4 每条件只有 8 张标定、9 张测试，门限方差很大，换数据要重新标定。
+
+运行时这块，`/api/v1/events` 的即时视图还在进程内存里；Edge-Mem 已经落 SQLite，但默认向量索引是进程内的，重启后重建。单消费者串行调用 LLM，换来背压和简单限流，高并发要 worker pool 并按设备保序。
+
+检索和时钟这块，哈希 embedding 不是语义模型，真实语义检索需要替换 `Embedder`。时间解析只覆盖项目里会遇到的中文日期、相对时间和时段表达，不是通用 NLP；识别不了时回退最近 24 小时并标记 `fallback`。采样时钟默认是系统时钟包装，`ntp/ptp/gps` 只是显式标记，不含真实授时驱动。
+
+控制和安全这块，Modbus TCP 是纯标准库模拟从站，不是安全 PLC；联锁逻辑可以验证，但不能替代硬件安全回路。SPC 是诊断信号，不是自动停线依据。设备鉴权还没做，MQTT 用户名密码/TLS 只留了配置位，`POST /api/v1/events` 是本地测试钩子。
+
+最后，Python 是参考实现。迁到 STM32/ESP32 要替换采集、推理和传输适配器，门限和协议逻辑可以复用，但不是原样复制就能跑。
 
 ## 文档
 
