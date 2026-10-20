@@ -57,11 +57,51 @@ class InferenceInfo(StrictModel):
     top_k: list[TopK] = Field(default_factory=list, max_length=5)
 
 
+class ClockInfo(StrictModel):
+    """Quality of the clock that produced ``sample``.
+
+    ``synced`` is explicit because a system clock without NTP/PTP is not a
+    measurement-grade time base. The field is not cosmetic: dashboards should
+    count unsynced samples separately.
+    """
+
+    source: Literal["system", "monotonic", "ntp", "ptp", "gps"]
+    boot_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    offset_ms: float = Field(ge=-1_000_000.0, le=1_000_000.0)
+    synced: bool
+
+
+class SampleInfo(StrictModel):
+    """Timing metadata for one acquired frame.
+
+    Monotonic stamps measure intervals; wall stamps make the event joinable to
+    other instruments. Both are retained intentionally.
+    """
+
+    capture_mono_ns: int = Field(ge=0)
+    capture_wall_ns: int = Field(ge=0)
+    read_done_mono_ns: int = Field(ge=0)
+    infer_start_mono_ns: int = Field(ge=0)
+    infer_done_mono_ns: int = Field(ge=0)
+    emit_wall_ns: int = Field(ge=0)
+    publish_done_mono_ns: int | None = Field(default=None, ge=0)
+    capture_dt_us: float | None = Field(default=None, ge=0.0)
+    dropped_since_last: int = Field(default=0, ge=0)
+    end_to_end_ms: float = Field(ge=0.0)
+    deadline_ms: float = Field(gt=0.0)
+    deadline_missed: bool = False
+    clock: ClockInfo
+
+
 class GateInfo(StrictModel):
     decision: GateDecision
     reason: GateReason
     accept_threshold: float = Field(ge=0.0, le=1.0)
     review_threshold: float = Field(ge=0.0, le=1.0)
+    calibrated_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    calibration_version: str | None = Field(default=None, max_length=64)
+    conformal_qhat: float | None = Field(default=None, ge=0.0, le=1.0)
+    conformal_set: list[str] = Field(default_factory=list, max_length=10)
 
     @field_validator("review_threshold")
     @classmethod
@@ -79,7 +119,7 @@ class Event(StrictModel):
     reconnects. ``event_id`` is globally unique for idempotent processing.
     """
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     device_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
     seq: int = Field(ge=0)
@@ -87,6 +127,7 @@ class Event(StrictModel):
     source: SourceInfo
     inference: InferenceInfo
     gate: GateInfo
+    sample: SampleInfo | None = None
 
     @field_validator("ts")
     @classmethod

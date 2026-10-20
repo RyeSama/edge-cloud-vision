@@ -7,9 +7,12 @@
 > 端侧先做一次"便宜"的判断，只把结构化 JSON 送上云；只有端侧拿不准的样本，才触发边缘大模型兜底。全链路不传输一帧原始图像。
 >
 > v0.2.0 新增 **Edge-Mem**：把事件按时间衰减分层存储，并提供“时间硬过滤 + 语义向量 + RRF 融合”的混合检索，让网关能回答“昨天下午那个穿红衣服的人是什么时候出现的？”
+>
+> v0.3.0 新增 **仪器化层**：采样时钟、端到端延迟/抖动/截止期/丢帧、置信度标定与 conformal 集合、Modbus TCP 联锁、确定性激励台、SPC 漂移监控和事件时间 watermark。
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-33%20passed-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen.svg)](tests)
+[![Release](https://img.shields.io/badge/release-v0.3.0-blue.svg)](https://github.com/RyeSama/edge-cloud-vision/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -62,7 +65,7 @@
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "event_id": "uuid4",
   "device_id": "edge-cam-01",
   "seq": 42,
@@ -81,6 +84,14 @@
     "reason": "ambiguous",
     "accept_threshold": 0.9,
     "review_threshold": 0.5
+  },
+  "sample": {
+    "capture_mono_ns": 1234567890,
+    "capture_wall_ns": 1760866200123000000,
+    "end_to_end_ms": 21.4,
+    "deadline_ms": 66.7,
+    "deadline_missed": false,
+    "clock": {"source": "ntp", "boot_id": "a1b2c3", "offset_ms": 1.2, "synced": true}
   }
 }
 ```
@@ -119,6 +130,31 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 
 细节、公式和配置见 [`docs/edge-mem.md`](docs/edge-mem.md)。
 
+### v0.3：从“识别 demo”到“测量仪器”
+
+v0.3 补的不是更多类别，而是**测量可信度**：
+
+- **时间链**：`SamplingClock` 同时记录单调时钟与墙钟；`Event.ts` 是采集时间，`SampleInfo` 保存 capture → infer → emit 各阶段时间戳；`RunMetrics` 再记录发布完成时刻，输出 p50/p95/p99、抖动、截止期错失、丢帧率，并区分 `clock.synced=false`。
+- **置信度标定**：等渗回归 + ECE/Brier；conformal prediction set 大小 > 1 时直接 `review`，不再把 softmax 当概率。
+- **控制闭环**：纯标准库 Modbus TCP 从站（coil/holding/input register），联锁状态机支持连续 N 帧确认、5 s 保持、stale/watchdog → fail-safe、reset/silence/capture 命令 ACK。
+- **可复现验证**：确定性距离/照度/模糊/遮挡激励矩阵；EWMA + CUSUM + 标签分布 JS 散度的 SPC 监控；事件时间 watermark 与晚到事件标记。
+
+完整说明见 [`docs/instrumentation.md`](docs/instrumentation.md)。
+
+```bash
+# 时间链 + 截止期
+python -m ecvision.edge --source synthetic --max-frames 200 \
+  --clock-source ntp --clock-offset-ms 50 --deadline-ms 80 \
+  --metrics-out data/clock.json
+
+# 控制闭环：Modbus TCP 127.0.0.1:15020
+python -m ecvision.edge --source synthetic --max-frames 300 \
+  --interlock --modbus --modbus-port 15020
+
+# 确定性激励台
+python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
+```
+
 ---
 
 ## 系统架构
@@ -151,13 +187,21 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 │  向量失败 → SQLite 文本回退（degraded）   LLM 未配置 → JSON 时间轴            │
 │  REST：/api/v1/memory/query  /ask  /compress  /stats                         │
 └──────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────── 仪器化 / 控制 v0.3 ─────────────────────────────┐
+│  SamplingClock：mono + wall + boot_id + sync 状态                            │
+│  SampleInfo：capture → read → infer → emit → publish 阶段时间戳              │
+│  CalibrationGate：isotonic + conformal set → accept/review                    │
+│  Interlock：连续 N 帧 / 保持 / stale / watchdog → Modbus TCP 寄存器           │
+│  Bench + SPC：确定性激励矩阵、EWMA/CUSUM、标签分布漂移                         │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 三条边界
+### 四条边界
 
 - **端侧与云端互不 import。** `edge` 不依赖 `cloud`，`cloud` 也不依赖 `edge`；两边只共享 `contracts.py` 和 `transport`。
 - **管线依赖接口，不依赖库。** `EdgeRunner` 依赖 `FrameSource`、`Classifier`、`EventPublisher` 三个 Protocol，不直接依赖 OpenCV、TFLite 或 paho。
 - **协议先于实现。** 事件字段、topic、QoS、去重规则都由 `contracts/` 和 `docs/protocol.md` 定义，C++ / ESP32 侧可以按同一份契约实现。
+- **控制输出不绕过联锁。** 视觉结果先进入 `InterlockController`，再由 `ModbusRegisterSink` 写寄存器；stale/watchdog 直接 fail-safe，不把模型输出当安全信号。
 
 ### 技术栈
 
@@ -167,6 +211,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 | 通信 | MQTT 3.1.1、paho-mqtt、QoS 1、LWT |
 | 边缘网关 | FastAPI、Pydantic、httpx、OpenAI 兼容接口 |
 | Edge-Mem | SQLite（WAL）、向量索引 Protocol、RRF、可选 Chroma |
+| 仪器化 / 控制 | 单调+墙钟、isotonic/conformal、Modbus TCP、联锁状态机、EWMA/CUSUM |
 | 测试与 CI | pytest、ruff、GitHub Actions（Python 3.10 / 3.12） |
 
 ---
@@ -209,14 +254,25 @@ edge-cloud-vision/
 │     ├─ context.py             #   Markdown/JSON 时间轴 + Token 预算
 │     ├─ answer.py              #   可选 LLM 回答（OpenAI 兼容）
 │     └─ service.py             #   编排：入库、查询、压缩、统计
+│  ├─ instrument/               # v0.3：采样时钟、标定、SPC
+│  │  ├─ clock.py               #   mono + wall + sync 状态
+│  │  ├─ calibration.py         #   isotonic、ECE/Brier、conformal set
+│  │  └─ spc.py                 #   EWMA/CUSUM + 标签分布漂移
+│  ├─ control/                  # v0.3：Modbus TCP + 联锁
+│  │  ├─ modbus.py              #   纯标准库 Modbus TCP 从站
+│  │  └─ interlock.py           #   去抖/保持/stale/watchdog/fail-safe
+│  └─ bench/                    # v0.3：确定性激励矩阵
+│     └─ stimulus.py            #   距离/照度/模糊/遮挡 + 重复性报告
 ├─ examples/minimal_loop.py     # 一屏版端侧骨架：采集→推理→门限→JSON
 ├─ .github/workflows/ci.yml     # GitHub Actions：ruff + pytest
-├─ tests/                       # 33 个单元/接口测试
+├─ tests/                       # 57 个单元/接口测试
 ├─ scripts/download_model.py    # 下载并校验 MobileNetV1 INT8 + ImageNet labels
 ├─ scripts/bench_memory.py      # Edge-Mem 微基准（压缩 + 查询延迟）
+├─ scripts/bench_stimulus.py    # v0.3 激励矩阵报告
+├─ scripts/fit_calibration.py   # v0.3 标定 / conformal profile
 ├─ contracts/                   # 语言无关 JSON Schema
 ├─ deploy/mosquitto/            # 本地 broker 配置
-├─ docs/                        # 协议、架构说明、ADR、Edge-Mem
+├─ docs/                        # 协议、架构、ADR、Edge-Mem、仪器化
 ├─ models/                      # 下载的 .tflite / labels.txt，git 忽略
 ├─ docker-compose.yml           # 一条命令起 Mosquitto
 ├─ pyproject.toml
@@ -274,7 +330,7 @@ python examples/minimal_loop.py
 输出是一行一条紧凑 JSON，例如：
 
 ```json
-{"schema_version":"1.0","event_id":"...","device_id":"edge-cam-01","seq":0,"ts":"...","source":{"width":320,"height":240,"fps":15.0},"inference":{"model":"mobilenet_v1_1.0_224_quant","label":"...","label_id":...,"confidence":0.93,"latency_ms":18.4,"top_k":[...]},"gate":{"decision":"accept","reason":"high_confidence","accept_threshold":0.9,"review_threshold":0.5}}
+{"schema_version":"1.1","event_id":"...","device_id":"edge-cam-01","seq":0,"ts":"...","source":{"width":320,"height":240,"fps":15.0},"inference":{"model":"mobilenet_v1_1.0_224_quant","label":"...","label_id":...,"confidence":0.93,"latency_ms":18.4,"top_k":[...]},"gate":{"decision":"accept","reason":"high_confidence","accept_threshold":0.9,"review_threshold":0.5}}
 ```
 
 摄像头：
@@ -331,6 +387,41 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 ```
 
 `/api/v1/memory/ask` 在未配置 LLM 时返回 `mode="json_timeline"`；配置 LLM 后返回 `mode="llm"`。完整说明见 [`docs/edge-mem.md`](docs/edge-mem.md)。
+
+### 试用 v0.3 仪器化
+
+时间链与截止期：
+
+```bash
+python -m ecvision.edge --source synthetic --max-frames 200 \
+  --clock-source ntp --clock-offset-ms 50 --deadline-ms 80 \
+  --metrics-out data/clock.json
+```
+
+控制闭环（Modbus TCP 从站）：
+
+```bash
+python -m ecvision.edge --source synthetic --max-frames 300 \
+  --interlock --modbus --modbus-port 15020 \
+  --assert-after 3 --clear-after-s 5 --stale-after-s 2
+```
+
+标定（需要自备 JSONL，格式见 [`docs/instrumentation.md`](docs/instrumentation.md)）：
+
+```bash
+python scripts/fit_calibration.py \
+  --input data/calibration.jsonl \
+  --out data/calibration.json \
+  --conformal-out data/conformal.json
+```
+
+确定性激励台：
+
+```bash
+python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
+```
+
+完整字段、寄存器映射和验收清单见 [`docs/instrumentation.md`](docs/instrumentation.md)。
 
 ### 端到端联调
 
@@ -424,6 +515,20 @@ Edge-Mem 的微基准（[`docs/measurements/edge-mem.json`](docs/measurements/ed
 `ingest` 2.62 s，`compress` 1.14 s；压缩后 hot 56 / warm 64 / cold 333，向量 120 条；查询 p50 2.94 ms、p95 5.36 ms，候选 87 条，返回 10 条，上下文 509 tokens，无截断。
 这是单机微基准，不是生产容量结论；它只说明默认离线实现能在毫秒级完成一次“时间过滤 + 向量召回 + RRF + 上下文组装”。
 
+v0.3 时间链实测（[`docs/measurements/clock-v03.json`](docs/measurements/clock-v03.json)，200 帧、NTP、+50 ms 偏移、80 ms 截止期）：
+
+| 指标 | 数值 |
+|---|---|
+| capture → publish p50 / p95 / p99 | 8.825 / 12.183 / 21.750 ms |
+| 推理 p50 / p95 | 8.46 / 11.90 ms |
+| 帧间隔 p50 / 抖动 p95 | 66.75 / 11.50 ms |
+| 截止期错失 / 丢帧 | 0 / 200，0 |
+| 时钟同步 | synced 200 / unsynced 0 |
+
+`stage_ms.read` 是等下一帧的采集等待（15 FPS 限速），不计入 capture→publish；这个口径修正本身也是 v0.3 的一部分：早期实现把限速 sleep 算进延迟，p50 会虚高到 66 ms。
+
+v0.3 激励台（[`docs/measurements/stimulus.md`](docs/measurements/stimulus.md)，8 场景 × 3 次，真实 MobileNetV1 INT8）：24 个样本全部 `review`，置信度 0.0011–0.0018，推理 p50 8.11–11.76 ms；合成目标无 ground truth，`accuracy` 为 `n/a`。它证明确定性和时序稳定性，不证明识别精度。
+
 ---
 
 ## 测试
@@ -442,7 +547,11 @@ python -m compileall -q src tests
 - 云端：无 Key 不联网、保守降级、代码围栏 JSON 解析、非法 risk 拒绝；
 - API：注入 review 事件 → 保守决策；重复 `event_id` 幂等且不重复调用 LLM；携带 `image_b64` 返回 422；memory 入库→查询→压缩；
 - topic：发布/订阅解析、错误层级拒绝；
-- Edge-Mem：时间衰减三层边界、中文时间窗解析、RRF 融合、Token 截断、向量失败降级、无 LLM 的 JSON 时间轴。
+- Edge-Mem：时间衰减三层边界、中文时间窗解析、RRF 融合、Token 截断、向量失败降级、无 LLM 的 JSON 时间轴；
+- 仪器化：时钟偏移/同步标记、ECE/Brier、isotonic 单调性、conformal 集合、标定门限、SPC 均值偏移/标签漂移；
+- 控制：连续 N 帧确认、最后一次检测后保持、stale → fault → reset、Modbus TCP FC5/FC1/FC3 往返；
+- 事件时间：晚到事件 `late=true`、watermark、检索仍保留；
+- 激励台：确定性渲染、重复性、CSV/Markdown 报告、ground truth 校验。
 
 GitHub Actions 在 Python 3.10 和 3.12 上执行 `ruff check` 与 `pytest -q`。
 
@@ -458,6 +567,11 @@ GitHub Actions 在 Python 3.10 和 3.12 上执行 `ruff check` 与 `pytest -q`�
 - 单消费者串行调用 LLM，换取背压和简单的限流；高并发需要 worker pool + 按设备保序。
 - 未实现设备鉴权。MQTT 用户名密码/TLS 只留了配置位，`POST /api/v1/events` 是本地测试钩子。
 - `metrics` 只统计应用层 payload，不含 TCP/TLS/MQTT 固定头；带宽结论已按此口径标注。
+- 采样时钟默认是系统时钟包装；`ntp/ptp/gps` 只是显式标记，不包含真实授时驱动。要拿到可信绝对时间，需接 NTP/PTP 客户端并监控 offset。
+- 标定需要自备工业场景的标注集；仓库只提供 isotonic/conformal 的实现和验收路径，不提供“已标定”的精度声明。
+- Modbus TCP 是纯标准库模拟从站，**不是安全 PLC**；联锁逻辑可验证，但不能替代硬件安全回路。
+- 激励台默认场景是合成目标，`accuracy=n/a`；真实精度必须用 `--source-image --ground-truth` 的现场数据。
+- SPC 是诊断信号，不是自动停线依据；告警阈值需要按现场基线调整。
 - Python 代码是参考实现。迁移到 STM32 / ESP32 时，需要替换采集、推理和传输适配器；门限与协议逻辑可以复用，但不是"原样复制即可运行"。
 
 ---

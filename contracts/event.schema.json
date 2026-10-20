@@ -1,5 +1,47 @@
 {
   "$defs": {
+    "ClockInfo": {
+      "additionalProperties": false,
+      "description": "Quality of the clock that produced ``sample``.\n\n``synced`` is explicit because a system clock without NTP/PTP is not a\nmeasurement-grade time base. The field is not cosmetic: dashboards should\ncount unsynced samples separately.",
+      "properties": {
+        "source": {
+          "enum": [
+            "system",
+            "monotonic",
+            "ntp",
+            "ptp",
+            "gps"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "boot_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "offset_ms": {
+          "maximum": 1000000.0,
+          "minimum": -1000000.0,
+          "title": "Offset Ms",
+          "type": "number"
+        },
+        "synced": {
+          "title": "Synced",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "boot_id",
+        "offset_ms",
+        "synced"
+      ],
+      "title": "ClockInfo",
+      "type": "object"
+    },
     "GateDecision": {
       "enum": [
         "accept",
@@ -28,6 +70,55 @@
           "minimum": 0.0,
           "title": "Review Threshold",
           "type": "number"
+        },
+        "calibrated_confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibrated Confidence"
+        },
+        "calibration_version": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibration Version"
+        },
+        "conformal_qhat": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conformal Qhat"
+        },
+        "conformal_set": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Conformal Set",
+          "type": "array"
         }
       },
       "required": [
@@ -98,6 +189,105 @@
       "title": "InferenceInfo",
       "type": "object"
     },
+    "SampleInfo": {
+      "additionalProperties": false,
+      "description": "Timing metadata for one acquired frame.\n\nMonotonic stamps measure intervals; wall stamps make the event joinable to\nother instruments. Both are retained intentionally.",
+      "properties": {
+        "capture_mono_ns": {
+          "minimum": 0,
+          "title": "Capture Mono Ns",
+          "type": "integer"
+        },
+        "capture_wall_ns": {
+          "minimum": 0,
+          "title": "Capture Wall Ns",
+          "type": "integer"
+        },
+        "read_done_mono_ns": {
+          "minimum": 0,
+          "title": "Read Done Mono Ns",
+          "type": "integer"
+        },
+        "infer_start_mono_ns": {
+          "minimum": 0,
+          "title": "Infer Start Mono Ns",
+          "type": "integer"
+        },
+        "infer_done_mono_ns": {
+          "minimum": 0,
+          "title": "Infer Done Mono Ns",
+          "type": "integer"
+        },
+        "emit_wall_ns": {
+          "minimum": 0,
+          "title": "Emit Wall Ns",
+          "type": "integer"
+        },
+        "publish_done_mono_ns": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publish Done Mono Ns"
+        },
+        "capture_dt_us": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capture Dt Us"
+        },
+        "dropped_since_last": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Dropped Since Last",
+          "type": "integer"
+        },
+        "end_to_end_ms": {
+          "minimum": 0.0,
+          "title": "End To End Ms",
+          "type": "number"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0.0,
+          "title": "Deadline Ms",
+          "type": "number"
+        },
+        "deadline_missed": {
+          "default": false,
+          "title": "Deadline Missed",
+          "type": "boolean"
+        },
+        "clock": {
+          "$ref": "#/$defs/ClockInfo"
+        }
+      },
+      "required": [
+        "capture_mono_ns",
+        "capture_wall_ns",
+        "read_done_mono_ns",
+        "infer_start_mono_ns",
+        "infer_done_mono_ns",
+        "emit_wall_ns",
+        "end_to_end_ms",
+        "deadline_ms",
+        "clock"
+      ],
+      "title": "SampleInfo",
+      "type": "object"
+    },
     "SourceInfo": {
       "additionalProperties": false,
       "properties": {
@@ -156,8 +346,11 @@
   "description": "A single edge observation.\n\n``seq`` is monotonic per device and lets the cloud detect gaps/dedup after\nreconnects. ``event_id`` is globally unique for idempotent processing.",
   "properties": {
     "schema_version": {
-      "const": "1.0",
-      "default": "1.0",
+      "default": "1.1",
+      "enum": [
+        "1.0",
+        "1.1"
+      ],
       "title": "Schema Version",
       "type": "string"
     },
@@ -190,6 +383,17 @@
     },
     "gate": {
       "$ref": "#/$defs/GateInfo"
+    },
+    "sample": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SampleInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

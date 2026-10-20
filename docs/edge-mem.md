@@ -123,7 +123,7 @@ python -m ecvision.cloud
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/v1/memory/stats` | 各层事件数、向量数、向量后端健康状态 |
+| GET | `/api/v1/memory/stats` | 各层事件数、向量数、向量后端健康状态，以及 `late_events` / `watermark` / `allowed_lateness_s` |
 | POST | `/api/v1/memory/query` | 混合检索，返回窗口、排序后的条目和上下文 |
 | POST | `/api/v1/memory/ask` | 检索 + 可选 LLM 回答；无 LLM 时返回 JSON 时间轴 |
 | POST | `/api/v1/memory/compress` | 手动触发一次时间衰减压缩 |
@@ -170,7 +170,30 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 
 ---
 
-## 6. 降级与可观测性
+## 6. 事件时间与晚到数据
+
+v0.3 把 `Event.ts` 明确为**采集时间**，Edge-Mem 另外记录入库时间：
+
+- `capture_time`：端侧采集时刻；
+- `ingest_time`：网关收到并写入 SQLite 的时刻；
+- `watermark`：已见过的最大 `capture_time`；
+- `late`：`capture_time < watermark - allowed_lateness_s`。
+
+晚到事件**不丢弃**，仍然入库并参与检索，只标记 `late=true`。原因和安全场景一致：丢一条晚到事件可能比多一条重复更危险。需要“晚到数据不得影响实时告警”时，由上层策略读取 `late` 字段决定，而不是在存储层静默过滤。
+
+```bash
+ECV_MEMORY_LATE_SECONDS=300 python -m ecvision.cloud
+```
+
+`MemoryStats` 返回：
+
+```json
+{"events": 3, "late_events": 1, "watermark": "2026-10-19T09:30:00+00:00", "allowed_lateness_s": 300}
+```
+
+---
+
+## 7. 降级与可观测性
 
 | 故障 | 行为 | 可观测性 |
 |---|---|---|
@@ -186,7 +209,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 
 ---
 
-## 7. 配置
+## 8. 配置
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -200,6 +223,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/memory/query \
 | `ECV_MEMORY_CHROMA_PATH` | `data/chroma` | Chroma 持久化目录 |
 | `ECV_MEMORY_VECTOR_DIM` | `256` | 哈希 embedding 维度 |
 | `ECV_MEMORY_AUTO_COMPRESS` | `1` | 启动时是否执行一次压缩 |
+| `ECV_MEMORY_LATE_SECONDS` | `300` | 允许迟到窗口；超过则标记 `late`，不丢弃 |
 
 启用 Chroma：
 
@@ -212,7 +236,7 @@ ECV_MEMORY_VECTOR_BACKEND=chroma python -m ecvision.cloud
 
 ---
 
-## 8. 取舍与限制
+## 9. 取舍与限制
 
 - **哈希 embedding 不是语义模型。** 它用字符 n-gram 做确定性向量化，保证离线可跑、测试可复现；真实语义检索应替换为 `Embedder` 的模型实现（如 bge-small / text-embedding-3-small），接口不变。
 - **时间解析不是通用 NLP。** 只覆盖项目实际会遇到的日期/相对时间/时段表达；更复杂的表达应接入专门的时间解析库或 LLM 抽取，并保留 `fallback` 标记。
@@ -223,7 +247,7 @@ ECV_MEMORY_VECTOR_BACKEND=chroma python -m ecvision.cloud
 
 ---
 
-## 9. 与 C++/MCU 的关系
+## 10. 与 C++/MCU 的关系
 
 Edge-Mem 本身运行在边缘网关（Python/FastAPI），不要求 MCU 实现向量检索。MCU 侧仍然只负责 v0.1 的采集、轻量推理和 JSON 发布；迁移边界没有变化。
 

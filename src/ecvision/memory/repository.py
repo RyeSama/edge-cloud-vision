@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS events (
     event_id      TEXT PRIMARY KEY,
     device_id     TEXT NOT NULL,
     ts            TEXT NOT NULL,
+    capture_ts    TEXT,
+    ingest_ts     TEXT,
+    late          INTEGER NOT NULL DEFAULT 0,
     label         TEXT NOT NULL,
     confidence    REAL NOT NULL,
     decision_json TEXT,
@@ -41,6 +44,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_device_ts ON events(device_id, ts);
 CREATE INDEX IF NOT EXISTS idx_events_label_ts ON events(label, ts);
+CREATE INDEX IF NOT EXISTS idx_events_late ON events(late);
 
 CREATE TABLE IF NOT EXISTS summaries (
     summary_id    TEXT PRIMARY KEY,
@@ -89,7 +93,14 @@ def from_iso(value: str) -> datetime:
 
 
 class EventRepository(Protocol):
-    def add_event(self, event: Event, decision: Decision | None = None) -> bool: ...
+    def add_event(
+        self,
+        event: Event,
+        decision: Decision | None = None,
+        *,
+        ingest_time: datetime | None = None,
+        late: bool = False,
+    ) -> bool: ...
 
     def attach_decision(self, event_id: str, decision: Decision) -> bool: ...
 
@@ -164,26 +175,55 @@ class SQLiteEventRepository:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add v0.3 event-time columns to an existing v0.2 database."""
+        columns = {
+            str(row["name"]) for row in self._conn.execute("PRAGMA table_info(events)").fetchall()
+        }
+        for name, ddl in (
+            ("capture_ts", "ALTER TABLE events ADD COLUMN capture_ts TEXT"),
+            ("ingest_ts", "ALTER TABLE events ADD COLUMN ingest_ts TEXT"),
+            ("late", "ALTER TABLE events ADD COLUMN late INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in columns:
+                self._conn.execute(ddl)
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_late ON events(late)")
 
     def close(self) -> None:
         with self._lock:
             self._conn.close()
 
     # ------------------------------------------------------------------ writing
-    def add_event(self, event: Event, decision: Decision | None = None) -> bool:
+    def add_event(
+        self,
+        event: Event,
+        decision: Decision | None = None,
+        *,
+        ingest_time: datetime | None = None,
+        late: bool = False,
+    ) -> bool:
+        ingest = ingest_time or datetime.now(timezone.utc)
+        if ingest.tzinfo is None:
+            raise ValueError("ingest_time must include a timezone")
         with self._lock:
             cursor = self._conn.execute(
                 """
                 INSERT OR IGNORE INTO events
-                    (event_id, device_id, ts, label, confidence, decision_json,
-                     risk_level, action, event_json, tier, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'hot', ?)
+                    (event_id, device_id, ts, capture_ts, ingest_ts, late, label,
+                     confidence, decision_json, risk_level, action, event_json,
+                     tier, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hot', ?)
                 """,
                 (
                     event.event_id,
                     event.device_id,
                     iso(event.ts),
+                    iso(event.ts),
+                    iso(ingest),
+                    1 if late else 0,
                     event.inference.label,
                     event.inference.confidence,
                     decision.model_dump_json() if decision else None,
@@ -316,8 +356,8 @@ class SQLiteEventRepository:
         with self._lock:
             rows = self._conn.execute(
                 f"""
-                SELECT event_id, device_id, ts, label, confidence, decision_json,
-                       risk_level, action, event_json
+                SELECT event_id, device_id, ts, capture_ts, ingest_ts, late, label,
+                       confidence, decision_json, risk_level, action, event_json
                   FROM events
                  WHERE {" AND ".join(clauses)}
                  ORDER BY ts DESC
@@ -471,6 +511,9 @@ def _item_from_event_row(row: sqlite3.Row) -> MemoryItem:
         risk_level=row["risk_level"],
         action=row["action"],
         text=event_text(event, decision),
+        capture_time=from_iso(row["capture_ts"]) if row["capture_ts"] else None,
+        ingest_time=from_iso(row["ingest_ts"]) if row["ingest_ts"] else None,
+        late=bool(row["late"]),
     )
 
 

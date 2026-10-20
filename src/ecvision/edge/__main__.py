@@ -18,10 +18,19 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from ecvision.config import MqttConfig
+from ecvision.control.interlock import InterlockConfig, InterlockController, ModbusRegisterSink
+from ecvision.control.modbus import ModbusTcpServer, RegisterMap
 from ecvision.edge.classifier import TFLiteClassifier
 from ecvision.edge.gate import GateConfig
 from ecvision.edge.pipeline import EdgeRunner, RunnerConfig
 from ecvision.edge.sources import build_source
+from ecvision.instrument.calibration import (
+    CalibrationGate,
+    CalibrationProfile,
+    ConformalProfile,
+)
+from ecvision.instrument.clock import SamplingClock
+from ecvision.instrument.spc import SpcMonitor
 from ecvision.transport.base import DryRunPublisher
 
 DEFAULT_MODEL = Path("models/mobilenet_v1_1.0_224_quant.tflite")
@@ -62,6 +71,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--metrics-out", type=Path, default=None)
     p.add_argument("--log-every", type=int, default=30)
     p.add_argument("--log-level", default="INFO")
+    p.add_argument("--deadline-ms", type=float, default=None, help="end-to-end deadline")
+    p.add_argument("--clock-offset-ms", type=float, default=0.0, help="inject a clock offset")
+    p.add_argument(
+        "--clock-source",
+        choices=["system", "monotonic", "ntp", "ptp", "gps"],
+        default="system",
+    )
+    clock_group = p.add_mutually_exclusive_group()
+    clock_group.add_argument("--clock-synced", action="store_true")
+    clock_group.add_argument("--clock-unsynced", action="store_true")
+    p.add_argument("--spc", action="store_true", help="enable EWMA/CUSUM quality charts")
+    p.add_argument("--calibration-profile", type=Path, default=None)
+    p.add_argument("--conformal-profile", type=Path, default=None)
+    p.add_argument("--modbus", action="store_true", help="expose the interlock as Modbus TCP")
+    p.add_argument("--modbus-host", default="127.0.0.1")
+    p.add_argument("--modbus-port", type=int, default=15020)
+    p.add_argument("--interlock", action="store_true", help="enable the debounced interlock")
+    p.add_argument("--assert-after", type=int, default=3)
+    p.add_argument("--clear-after-s", type=float, default=5.0)
+    p.add_argument("--stale-after-s", type=float, default=2.0)
     return p
 
 
@@ -79,6 +108,52 @@ def main(argv: list[str] | None = None) -> int:
         review_threshold=args.review_threshold,
     )
     source = build_source(args.source, args.width, args.height, args.fps, loop=args.loop)
+
+    calibration = None
+    if args.calibration_profile or args.conformal_profile:
+        profile = (
+            CalibrationProfile.model_validate_json(
+                args.calibration_profile.read_text(encoding="utf-8")
+            )
+            if args.calibration_profile
+            else None
+        )
+        conformal = (
+            ConformalProfile.model_validate_json(args.conformal_profile.read_text(encoding="utf-8"))
+            if args.conformal_profile
+            else None
+        )
+        calibration = CalibrationGate(profile=profile, conformal=conformal, config=gate_config)
+
+    clock_synced = True if args.clock_synced else (False if args.clock_unsynced else None)
+    clock = SamplingClock(
+        source=args.clock_source,
+        offset_ms=args.clock_offset_ms,
+        synced=clock_synced,
+    )
+    spc = SpcMonitor() if args.spc else None
+
+    registers = RegisterMap()
+    interlock = None
+    modbus_server = None
+    if args.interlock or args.modbus:
+        interlock_config = InterlockConfig(
+            assert_after=args.assert_after,
+            clear_after_s=args.clear_after_s,
+            stale_after_s=args.stale_after_s,
+        )
+        interlock = InterlockController(
+            interlock_config,
+            sink=ModbusRegisterSink(registers, interlock_config),
+        )
+        if args.modbus:
+            modbus_server = ModbusTcpServer(
+                args.modbus_host,
+                args.modbus_port,
+                register_map=registers,
+            )
+            modbus_server.start()
+            log.info("Modbus TCP listening on %s:%d", modbus_server.host, modbus_server.port)
 
     publisher = DryRunPublisher()
     if not args.dry_run:
@@ -101,13 +176,15 @@ def main(argv: list[str] | None = None) -> int:
             float_normalize=args.float_normalize,
         )
         log.info(
-            "edge=%s source=%s model=%s input=%dx%d qos=1 dry_run=%s",
+            "edge=%s source=%s model=%s input=%dx%d qos=1 dry_run=%s clock=%s synced=%s",
             args.device_id,
             source.description,
             classifier.model_name,
             classifier.input_size[0],
             classifier.input_size[1],
             args.dry_run,
+            clock.source,
+            clock.synced,
         )
         runner = EdgeRunner(
             source=source,
@@ -119,7 +196,12 @@ def main(argv: list[str] | None = None) -> int:
                 gate=gate_config,
                 top_k=args.top_k,
                 log_every=max(1, args.log_every),
+                deadline_ms=args.deadline_ms,
             ),
+            clock=clock,
+            calibration=calibration,
+            spc=spc,
+            interlock=interlock,
         )
         runner.run(
             max_frames=args.max_frames,
@@ -130,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         log.info("stopped by user")
     finally:
         source.close()
+        if modbus_server is not None:
+            modbus_server.stop()
     return 0
 
 

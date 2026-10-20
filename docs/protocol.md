@@ -1,4 +1,4 @@
-# MQTT 通信协议 v1.0
+# MQTT 通信协议 v1.1
 
 本文件是端侧（模块 A/B）与边缘网关（模块 C）之间的线上契约。JSON 的结构以
 [`contracts/event.schema.json`](../contracts/event.schema.json) 为准；本文件解释
@@ -36,7 +36,7 @@ ecv/v1/{device_id}/command   云 → 端   预留控制通道，QoS1，不 retai
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "event_id": "8f14e45f-ea2b-4c1e-9f0a-3d2b6c7a1e90",
   "device_id": "edge-cam-01",
   "seq": 42,
@@ -59,6 +59,14 @@ ecv/v1/{device_id}/command   云 → 端   预留控制通道，QoS1，不 retai
     "reason": "ambiguous",
     "accept_threshold": 0.9,
     "review_threshold": 0.5
+  },
+  "sample": {
+    "capture_mono_ns": 1234567890,
+    "capture_wall_ns": 1760866200123000000,
+    "end_to_end_ms": 21.4,
+    "deadline_ms": 66.7,
+    "deadline_missed": false,
+    "clock": {"source": "ntp", "boot_id": "a1b2c3", "offset_ms": 1.2, "synced": true}
   }
 }
 ```
@@ -67,7 +75,8 @@ ecv/v1/{device_id}/command   云 → 端   预留控制通道，QoS1，不 retai
 
 | 字段 | 必填 | 约束 | 用途 |
 |---|---|---|---|
-| `schema_version` | 是 | 固定 `"1.0"` | 版本演进 |
+| `schema_version` | 是 | `"1.0"` 或 `"1.1"`；v0.3 默认 `"1.1"` | 版本演进；`1.1` 新增可选 `sample` |
+| `sample` | 否 | v0.3 采样元数据 | 采集/推理/发布时间戳、截止期、时钟同步状态 |
 | `event_id` | 是 | UUID4 字符串 | 幂等键；重发必须复用同一个值 |
 | `device_id` | 是 | 1–64 字符 | 设备身份；与 topic 校验 |
 | `seq` | 是 | ≥ 0，设备内单调递增 | 发现断线空洞、估算丢包 |
@@ -95,7 +104,7 @@ confidence < review_threshold             -> decision=review, reason=low_confide
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "device_id": "edge-cam-01",
   "state": "online",
   "ts": "2026-10-19T09:30:10.000000Z",
@@ -152,7 +161,7 @@ confidence < review_threshold             -> decision=review, reason=low_confide
 
 ## 8. 版本演进
 
-- 新增可选字段：保持 `1.0`，旧消费者忽略（但本项目 `extra="forbid"`，所以新增字段
-  需要同步升级消费者，或改为可选白名单）。
+- 新增可选字段：小版本升位（如 `1.0` → `1.1` 的 `sample`），旧消费者忽略；本项目
+  `extra="forbid"`，所以消费端需同步升级模型，或把新字段明确设为可选。
 - 删除/改名/改变语义：升 `2.0`，同时支持双订阅一段时间。
 - 端侧与云端应在握手/状态消息中带 `schema_version`，便于灰度。

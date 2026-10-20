@@ -33,6 +33,11 @@
 - `cloud.decision` 只依赖 `Event` / `Settings` / `httpx`，可以脱离 FastAPI 单测。
 - `memory` 的存储和检索都通过 `EventRepository` / `VectorIndex` / `Embedder` /
   `Answerer` Protocol 注入；默认实现可离线跑，Chroma 是可选适配器。
+- `instrument` 只依赖标准库，负责时钟、标定和 SPC；不 import `edge`/`cloud`。
+- `control` 只依赖标准库，Modbus TCP 从站和联锁状态机可以脱离视觉单测。
+- `bench` 只依赖 `Classifier` Protocol 和 numpy/OpenCV，用来产生确定性激励，不 import `EdgeRunner`。
+- `edge.pipeline` 是唯一把采集、推理、门限、仪器化、联锁串起来的地方；它通过构造参数接收
+  `SamplingClock`、`CalibrationGate`、`SpcMonitor`、`InterlockController`，不直接 new 这些对象。
 
 ## 2. 运行时序（正常路径）
 
@@ -90,7 +95,15 @@ Edge process                          Cloud process
 - 决策写入是"先存事件、后 attach 决策"；查询时可能短暂看到 `decision=null`，
   这是有意的：不阻塞事件可见性。
 
-## 5. 故障模式
+## 5. 时间语义
+
+- `Event.ts` 是**采集时间**（capture wall clock），不是发出时间。
+- `SampleInfo.capture_mono_ns` 来自 `perf_counter_ns`，用于延迟/抖动；`capture_wall_ns` 来自墙钟，用于跨设备比较。
+- `Event.sample.end_to_end_ms` 是 capture → emit；`RunMetrics.latency_ms` 是 capture → publish_done，二者口径不同。
+- `ClockInfo.synced=false` 时事件仍然发出，但指标单独计数 `unsynced_frames`；不把未同步时间当可信时间。
+- Edge-Mem 的 `capture_time` 是事件时间，`ingest_time` 是入库时间；`watermark` 之前超过允许迟到窗口的事件标记 `late=true`，但仍然保留。
+
+## 6. 故障模式
 
 | 故障 | 检测 | 恢复 | 数据影响 |
 |---|---|---|---|
@@ -101,12 +114,18 @@ Edge process                          Cloud process
 | Edge-Mem SQLite 初始化失败 | exception | memory API 返回 503，v0.1 主链路继续 | 记忆不可用，事件仍可接收 |
 | 向量索引失败 | exception | 回退 SQLite 文本查询，`degraded=true` | 召回率下降，不丢事件 |
 | 压缩期间崩溃 | 启动时按时间重跑 | 幂等 upsert / 已删除 raw 不再处理 | warm/cold 可能重复摘要，不会丢热数据 |
+| 时钟未同步 | `ClockInfo.synced=false` | 继续采集，指标标记 | 时间不可用于跨设备对齐 |
+| 截止期错失 | `end_to_end_ms > deadline_ms` | 计数并继续 | `deadline_misses` / `deadline_miss_rate` 上升 |
+| Modbus 端口占用 | `OSError` at bind | CLI 报错退出或禁用 `--modbus` | 不影响无控制模式 |
+| 联锁 stale/watchdog | 超过 `stale_after_s` 无样本 / 心跳 | 进入 `fault`，`fail_safe=true`，锁存 | 需要 `reset` 才恢复 |
+| 标定 profile 缺失 | `CalibrationGate(profile=None)` | 使用原始置信度 | 继续运行，但不声称已标定 |
+| SPC 告警 | EWMA/CUSUM/JS 超限 | 记录 `spc.alerts`，不阻断 | 用于漂移诊断 |
 | LLM 超时 | httpx timeout | 下一次请求重试 | 当前事件降级为人工复核 |
 | LLM 限流 429 | HTTPStatusError | 不重试，降级 | 计数 fallback |
 | 队列满 | `QueueFull` | 丢弃最晚到达的事件 | 计数 dropped |
 | 畸形消息 | Pydantic | 丢弃并继续 | 计数 invalid |
 
-## 6. 带宽口径
+## 7. 带宽口径
 
 `RunMetrics` 只统计应用层 JSON 字节，不含：
 
@@ -120,7 +139,7 @@ Edge process                          Cloud process
 原始 RGB 基线：`frames × width × height × 3`。这是未压缩的传感器数据，作为上界；
 JPEG 基线按 15 KB/帧参考值，作为更严格的对照。两个都报告，才经得起追问。
 
-## 7. 向 C++/MCU 迁移的映射
+## 8. 向 C++/MCU 迁移的映射
 
 | Python | C++/MCU | 说明 |
 |---|---|---|
@@ -135,12 +154,16 @@ JPEG 基线按 15 KB/帧参考值，作为更严格的对照。两个都报告�
 迁移时**不要**把 Python 的 Pydantic 模型照搬成大量类；C++ 端只需要一个固定大小的
 struct + 序列化函数。协议字段和门限语义才是需要保持一致的部分。
 
-## 8. 已知瓶颈与下一步
+## 9. 已知瓶颈与下一步
 
 1. **单消费者**：LLM 串行，吞吐受限于单次调用延迟。下一步：按设备哈希分片 +
    每设备保序，或引入本地小模型做第二层。
-2. **内存事件库**：重启丢失。下一步：SQLite（WAL）+ 保留策略，或 ClickHouse。
+2. **v0.1 即时视图仍是进程内存**：重启丢失；持久化由 Edge-Mem SQLite 承担。下一步：
+   把 `/api/v1/events` 也切到 SQLite 查询，或引入 ClickHouse。
 3. **无鉴权/TLS**：本地演示配置。下一步：mTLS + 每设备 ACL。
-4. **固定阈值**：不同场景最优阈值不同。下一步：按类别/场景配置，或基于置信度
-   校准（temperature scaling）后再门限。
+4. **门限仍缺工业标定集**：`CalibrationGate` 已支持 isotonic/conformal，但仓库没有
+   工业缺陷/安全场景的标注数据；当前只能证明方法和降级路径。
 5. **无端侧持久化**：断电丢缓冲。下一步：环形 flash 日志（LittleFS）。
+6. **Modbus 模拟器不是安全 PLC**：它验证协议、时序和联锁逻辑，不能替代安全回路。
+7. **激励台是合成场景**：证明可复现性和时序稳定性，不证明识别精度；真实精度需要
+   带 ground truth 的现场数据。

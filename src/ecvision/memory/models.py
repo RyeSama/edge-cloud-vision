@@ -92,12 +92,15 @@ class MemoryItem(StrictModel):
     score: float = Field(default=0.0, ge=0.0)
     time_rank: int | None = Field(default=None, ge=1)
     semantic_rank: int | None = Field(default=None, ge=1)
+    capture_time: datetime | None = None
+    ingest_time: datetime | None = None
+    late: bool = False
 
-    @field_validator("ts")
+    @field_validator("ts", "capture_time", "ingest_time")
     @classmethod
-    def aware(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            raise ValueError("item timestamp must include a timezone")
+    def aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("item timestamps must include a timezone")
         return value
 
 
@@ -170,6 +173,9 @@ class MemoryStats(StrictModel):
     vector_backend: str
     vector_healthy: bool
     last_vector_error: str | None = None
+    late_events: int = Field(default=0, ge=0)
+    watermark: datetime | None = None
+    allowed_lateness_s: int = Field(default=300, ge=0)
 
 
 class CompressRequest(StrictModel):

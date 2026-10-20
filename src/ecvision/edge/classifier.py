@@ -30,6 +30,7 @@ class Prediction:
     candidates: tuple[Candidate, ...]
     preprocess_ms: float
     inference_ms: float
+    probabilities: tuple[float, ...] | None = None
 
     @property
     def top1(self) -> Candidate:
@@ -179,4 +180,5 @@ class TFLiteClassifier:
             candidates=candidates,
             preprocess_ms=(preprocessed - started) * 1000.0,
             inference_ms=(finished - preprocessed) * 1000.0,
+            probabilities=tuple(float(value) for value in scores),
         )

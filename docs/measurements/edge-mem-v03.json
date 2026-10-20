@@ -1,0 +1,51 @@
+{
+  "measured_at": "2026-10-20T05:18:58+00:00",
+  "events": 1000,
+  "runs": 50,
+  "ingest_ms": 2406.11,
+  "compress_ms": 1029.89,
+  "stats_before": {
+    "events": 1000,
+    "summaries": 0,
+    "cold_events": 0,
+    "vectors": 1000,
+    "vector_backend": "memory",
+    "vector_healthy": true,
+    "last_vector_error": null,
+    "late_events": 972,
+    "watermark": "2026-10-20T05:18:58Z",
+    "allowed_lateness_s": 300
+  },
+  "stats_after": {
+    "events": 56,
+    "summaries": 64,
+    "cold_events": 333,
+    "vectors": 120,
+    "vector_backend": "memory",
+    "vector_healthy": true,
+    "last_vector_error": null,
+    "late_events": 972,
+    "watermark": "2026-10-20T05:18:58Z",
+    "allowed_lateness_s": 300
+  },
+  "compression": {
+    "now": "2026-10-20T05:18:58Z",
+    "warm_summaries": 64,
+    "warm_events_removed": 611,
+    "cold_archived": 333,
+    "vectors_deleted": 944,
+    "errors": []
+  },
+  "query": {
+    "p50_ms": 2.49,
+    "p95_ms": 5.174,
+    "mean_ms": 3.031,
+    "max_ms": 6.762,
+    "total_candidates": 87,
+    "returned_items": 10,
+    "context_tokens": 509,
+    "context_truncated": false,
+    "degraded": false,
+    "warnings": []
+  }
+}

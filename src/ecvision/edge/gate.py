@@ -32,12 +32,24 @@ class GateResult:
     decision: GateDecision
     reason: GateReason
 
-    def to_info(self, config: GateConfig) -> GateInfo:
+    def to_info(
+        self,
+        config: GateConfig,
+        *,
+        calibrated_confidence: float | None = None,
+        calibration_version: str | None = None,
+        conformal_qhat: float | None = None,
+        conformal_set: list[str] | None = None,
+    ) -> GateInfo:
         return GateInfo(
             decision=self.decision,
             reason=self.reason,
             accept_threshold=config.accept_threshold,
             review_threshold=config.review_threshold,
+            calibrated_confidence=calibrated_confidence,
+            calibration_version=calibration_version,
+            conformal_qhat=conformal_qhat,
+            conformal_set=conformal_set or [],
         )
 
 

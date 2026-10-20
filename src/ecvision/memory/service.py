@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from ecvision.contracts import Decision, Event
@@ -47,6 +47,7 @@ class MemorySettings(Protocol):
     memory_chroma_path: str
     memory_vector_dim: int
     memory_auto_compress: bool
+    memory_late_seconds: int
 
 
 class MemoryService:
@@ -61,6 +62,7 @@ class MemoryService:
         llm_enabled: bool,
         answerer: Answerer | None = None,
         startup_warnings: list[str] | None = None,
+        allowed_lateness_s: int = 300,
     ) -> None:
         self._repo = repository
         self._vector = vector_index
@@ -69,9 +71,12 @@ class MemoryService:
         self._retriever = retriever
         self._llm_enabled = llm_enabled
         self._answerer = answerer
+        self.allowed_lateness_s = max(0, int(allowed_lateness_s))
         self.last_vector_error: str | None = None
         self.last_storage_error: str | None = None
         self.startup_warnings = startup_warnings or []
+        self._watermark = None
+        self._late_count = 0
 
     @classmethod
     def from_settings(cls, settings: MemorySettings) -> MemoryService:
@@ -109,6 +114,7 @@ class MemoryService:
             llm_enabled=settings.llm_enabled,
             answerer=OpenAIMemoryAnswerer(settings) if settings.llm_enabled else None,
             startup_warnings=[warning] if warning else [],
+            allowed_lateness_s=getattr(settings, "memory_late_seconds", 300),
         )
         service.reindex()
         if settings.memory_auto_compress:
@@ -120,14 +126,30 @@ class MemoryService:
         return service
 
     # ------------------------------------------------------------------ writes
-    def ingest(self, event: Event, decision: Decision | None = None) -> bool:
+    def ingest(
+        self,
+        event: Event,
+        decision: Decision | None = None,
+        *,
+        ingest_time: datetime | None = None,
+    ) -> bool:
+        ingest_time = ingest_time or datetime.now(timezone.utc)
+        if ingest_time.tzinfo is None:
+            raise ValueError("ingest_time must include a timezone")
+        late = False
+        if self._watermark is None or event.ts > self._watermark:
+            self._watermark = event.ts
+        else:
+            late = event.ts < self._watermark - timedelta(seconds=self.allowed_lateness_s)
         try:
-            added = self._repo.add_event(event, decision)
+            added = self._repo.add_event(event, decision, ingest_time=ingest_time, late=late)
         except Exception as exc:  # noqa: BLE001 - memory must not break ingest
             self.last_storage_error = f"{type(exc).__name__}: {exc}"
             log.error("memory ingest failed for %s: %s", event.event_id, self.last_storage_error)
             return False
         if added:
+            if late:
+                self._late_count += 1
             self._index_event(event, decision)
         return added
 
@@ -266,6 +288,9 @@ class MemoryService:
             vector_backend=self._vector.backend,
             vector_healthy=healthy,
             last_vector_error=self.last_vector_error,
+            late_events=self._late_count,
+            watermark=self._watermark,
+            allowed_lateness_s=self.allowed_lateness_s,
         )
 
     async def aclose(self) -> None:

@@ -145,6 +145,37 @@
           ],
           "default": null,
           "title": "Semantic Rank"
+        },
+        "capture_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capture Time"
+        },
+        "ingest_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ingest Time"
+        },
+        "late": {
+          "default": false,
+          "title": "Late",
+          "type": "boolean"
         }
       },
       "required": [

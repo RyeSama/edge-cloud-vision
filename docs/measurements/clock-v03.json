@@ -1,0 +1,80 @@
+{
+  "frames": 200,
+  "accepted": 0,
+  "review": 200,
+  "elapsed_s": 14.063,
+  "fps": 14.22,
+  "configured_fps": 15.0,
+  "json_payload_bytes": 220380,
+  "raw_rgb_equivalent_bytes": 46080000,
+  "jpeg_15kb_reference_bytes": 3000000,
+  "reduction_vs_raw_rgb": 0.995217,
+  "reduction_vs_jpeg_15kb": 0.92654,
+  "latency_ms": {
+    "count": 200,
+    "p50": 8.825,
+    "p95": 12.183,
+    "p99": 21.75,
+    "max": 23.621,
+    "mean": 9.434
+  },
+  "stage_ms": {
+    "read": {
+      "count": 200,
+      "p50": 58.105,
+      "p95": 67.094,
+      "p99": 69.745,
+      "max": 70.671,
+      "mean": 56.663
+    },
+    "infer": {
+      "count": 200,
+      "p50": 8.46,
+      "p95": 11.902,
+      "p99": 20.627,
+      "max": 22.587,
+      "mean": 9.065
+    },
+    "publish": {
+      "count": 200,
+      "p50": 0.241,
+      "p95": 0.514,
+      "p99": 0.948,
+      "max": 1.569,
+      "mean": 0.289
+    }
+  },
+  "capture_dt_us": {
+    "count": 199,
+    "p50": 66746.3,
+    "p95": 75695.1,
+    "p99": 78352.2,
+    "max": 80282.2,
+    "mean": 66272.976
+  },
+  "jitter_us": {
+    "count": 199,
+    "p50": 4059.033,
+    "p95": 11498.333,
+    "p99": 14959.167,
+    "max": 55555.667,
+    "mean": 5057.209
+  },
+  "deadline_ms": 66.667,
+  "deadline_misses": 0,
+  "deadline_miss_rate": 0.0,
+  "dropped_frames": 0,
+  "drop_rate": 0.0,
+  "clock": {
+    "source": "ntp",
+    "synced_frames": 200,
+    "unsynced_frames": 0
+  },
+  "transport": {
+    "connected": false,
+    "published": 0,
+    "buffered": 200,
+    "dropped": 0,
+    "payload_bytes": 0
+  }
+}

@@ -28,6 +28,7 @@ class CloudSettings:
     memory_chroma_path: str = "data/chroma"
     memory_vector_dim: int = 256
     memory_auto_compress: bool = True
+    memory_late_seconds: int = 300
 
     @property
     def llm_enabled(self) -> bool:
@@ -55,4 +56,5 @@ class CloudSettings:
             memory_vector_dim=env_int("ECV_MEMORY_VECTOR_DIM", 256),
             memory_auto_compress=os.getenv("ECV_MEMORY_AUTO_COMPRESS", "1").lower()
             not in {"0", "false", "no", "off"},
+            memory_late_seconds=env_int("ECV_MEMORY_LATE_SECONDS", 300),
         )
