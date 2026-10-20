@@ -7,6 +7,7 @@
 | [architecture.md](architecture.md) | 模块怎么分层？线程/异步模型是什么？故障时会发生什么？怎么迁到 C++/MCU？ |
 | [edge-mem.md](edge-mem.md) | v0.2 的时间衰减、SQLite/向量混合存储、RRF 检索、Token 预算和降级 |
 | [instrumentation.md](instrumentation.md) | v0.3 的采样时钟、延迟/抖动/截止期、标定与 conformal、Modbus 联锁、激励台、SPC、事件时间 |
+| [measurements/v0.4/README.md](measurements/v0.4/README.md) | v0.4 的温度标定、分条件 accept 门限、false-accept 预算和独立测试结果 |
 | [protocol.md](protocol.md) | MQTT topic、QoS、心跳、离线缓冲、去重、错误处理的具体约定 |
 | [adr/0001-mqtt-vs-socket.md](adr/0001-mqtt-vs-socket.md) | 为什么主线选 MQTT 而不是裸 Socket/WebSocket/ZeroMQ？ |
 | [measurements/README.md](measurements/README.md) | 1000 帧带宽实验的口径、命令和原始结果 |
@@ -20,6 +21,7 @@
 4. **带宽数字必须带基线。** 同时报告相对原始 RGB 和相对 15 KB/帧 MJPEG 的降幅；只统计 MQTT payload，不含 TCP/TLS 固定头。
 5. **记忆检索必须可降级。** 时间窗先做 SQLite 硬过滤；向量检索失败回退文本查询并标记 `degraded`；没有 LLM 时返回 JSON 时间轴，而不是 500。
 6. **测量结论必须带口径。** 延迟区分 capture→emit 与 capture→publish；置信度只有经过标定才称为概率；时间戳区分 `synced/unsynced`；控制输出必须经过联锁，不能把模型结果直接当执行信号。
+7. **分条件验收必须有预算。** 每个条件单独选 accept 门限时，必须同时报告 coverage、selective accuracy 和 false-accept；样本不足 `min_samples` 时回退全局默认，不硬拟合。
 
 ## 复现实验
 
@@ -49,6 +51,20 @@ python -m ecvision.edge --source synthetic --max-frames 300 \
 
 # 6) v0.3 激励台（需要模型）
 python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
+
+# 7) v0.4 标定 + 分条件验收（需要带 label 的 manifest）
+python scripts/split_manifest.py --input data/manifest.csv \
+  --calibration-out data/manifest-cal.csv --test-out data/manifest-test.csv --seed 7
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-raw
+python scripts/fit_calibration.py --input data/cal-raw/predictions.csv \
+  --method temperature --out data/calibration-v04.json
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-temp \
+  --calibration-profile data/calibration-v04.json
+python scripts/fit_policy.py --input data/cal-temp/predictions.csv \
+  --false-accept-budget 0.05 --min-samples 20 --out data/acceptance-policy-v04.json
+python scripts/eval_dataset.py --manifest data/manifest-test.csv --out-dir data/test-policy \
+  --calibration-profile data/calibration-v04.json \
+  --policy data/acceptance-policy-v04.json
 ```
 
 ## 已知限制

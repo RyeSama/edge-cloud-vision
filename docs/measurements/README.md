@@ -100,3 +100,15 @@ python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
 ## v0.3 事件时间
 
 `tests/test_event_time.py` 覆盖：3 条事件（10 分钟前、1 秒前、晚到 10 分钟）→ `events=3`、`late_events=1`，watermark 单调，检索结果保留 `late=true`。这是逻辑测试，不是吞吐 benchmark。
+
+## v0.4 标定与分条件验收
+
+完整说明和复现命令见 [`v0.4/README.md`](v0.4/README.md)。数据是 17 类 × 5 条件 = 85 张公开 ImageNet 样本图，按类别切分为 40 张标定 / 45 张测试。
+
+| 方案（45 张测试集） | accuracy | coverage | selective accuracy | false accept |
+|---|---:|---:|---:|---:|
+| 原始置信度，全局 0.90 | 0.667 | 0.289 | 1.000 | 0.000 |
+| 温度标定，全局 0.90 | 0.667 | 0.000 | n/a | 0.000 |
+| 温度标定 + 分条件策略 | 0.667 | 0.356 | 0.938 | 0.022 |
+
+温度标定 `T=3.22`。分条件策略把 coverage 从 28.9% 提到 35.6%，代价是 2.2% false accept；ECE 在测试集上反而升高（0.291 vs 标定集 0.158），说明小样本和类别偏移下标定不是万能药。每条件只有 8 张标定图，门限只能作为工程起点，不是出厂参数。

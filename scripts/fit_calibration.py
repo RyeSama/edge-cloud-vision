@@ -1,67 +1,98 @@
 #!/usr/bin/env python3
-"""Fit calibration and conformal profiles from a JSONL calibration set.
+"""Fit a calibration profile and optional conformal profile.
 
-Input lines (one JSON object per line)::
+Input can be JSONL or CSV. JSONL lines look like::
 
     {"confidence": 0.93, "correct": true}
     {"confidence": 0.62, "correct": false, "score": 0.78}
 
-``score`` is optional; when omitted, ``1 - confidence`` is used as the
-nonconformity score for conformal calibration. The output is a strict
-``CalibrationProfile`` / ``ConformalProfile`` that ``CalibrationGate`` can load.
+CSV must contain ``confidence`` and ``correct``; ``score`` is optional. ``score``
+is the nonconformity score for conformal calibration; when omitted,
+``1 - confidence`` is used. The output is a strict ``CalibrationProfile`` /
+``ConformalProfile`` that ``CalibrationGate`` can load.
 
-This is intentionally dataset-agnostic: the repo does not ship a labelled
-industrial dataset, so the calibration set is user-supplied. Do not fit on the
-same frames used to tune the model.
+Fit on a held-out calibration split, never on the frames used to tune the
+model or choose the acceptance policy.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ecvision.instrument.calibration import (  # noqa: E402
     CalibrationPoint,
+    fit_calibration,
     fit_conformal,
-    fit_isotonic,
 )
 
+_TRUE = {"1", "true", "yes", "y"}
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, required=True, help="JSONL calibration set")
-    parser.add_argument("--out", type=Path, default=ROOT / "data" / "calibration.json")
-    parser.add_argument("--conformal-out", type=Path, default=None)
-    parser.add_argument("--alpha", type=float, default=0.1)
-    parser.add_argument("--dataset-id", default="local-calibration")
-    args = parser.parse_args()
 
-    points: list[CalibrationPoint] = []
-    scores: list[float] = []
-    for line_number, raw in enumerate(args.input.read_text(encoding="utf-8").splitlines(), start=1):
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in _TRUE
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         try:
-            row = json.loads(line)
+            rows.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"line {line_number}: invalid JSON ({exc})") from exc
+    return rows
+
+
+def _read_csv(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, required=True, help="JSONL or CSV calibration set")
+    parser.add_argument("--out", type=Path, default=ROOT / "data" / "calibration.json")
+    parser.add_argument("--conformal-out", type=Path, default=None)
+    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument(
+        "--method",
+        choices=("isotonic", "temperature", "identity"),
+        default="isotonic",
+        help="isotonic for a non-monotone curve, temperature for a single-parameter baseline",
+    )
+    parser.add_argument("--dataset-id", default="local-calibration")
+    args = parser.parse_args()
+
+    rows = _read_csv(args.input) if args.input.suffix.lower() == ".csv" else _read_jsonl(args.input)
+    points: list[CalibrationPoint] = []
+    scores: list[float] = []
+    for line_number, row in enumerate(rows, start=1):
+        try:
             confidence = float(row["confidence"])
-            correct = bool(row["correct"])
-            weight = float(row.get("weight", 1.0))
+            correct = _parse_bool(row["correct"])
+            weight = float(row.get("weight") or 1.0)
         except (KeyError, TypeError, ValueError) as exc:
-            parser.error(f"line {line_number}: invalid record ({exc})")
+            parser.error(f"row {line_number}: invalid record ({exc})")
         points.append(CalibrationPoint(confidence=confidence, correct=correct, weight=weight))
-        score = row.get("score", 1.0 - confidence)
-        scores.append(float(score))
+        score = row.get("score")
+        scores.append(float(score) if score not in (None, "") else 1.0 - confidence)
 
     if not points:
         parser.error("no calibration rows found")
 
-    profile = fit_isotonic(points, dataset_id=args.dataset_id)
+    profile = fit_calibration(points, method=args.method, dataset_id=args.dataset_id)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
     print(
@@ -69,9 +100,11 @@ def main() -> int:
             {
                 "out": str(args.out),
                 "n": profile.n,
+                "method": profile.method,
+                "temperature": profile.temperature,
                 "ece": profile.ece,
                 "brier": profile.brier,
-                "method": profile.method,
+                "nll": profile.nll,
             },
             ensure_ascii=False,
         )

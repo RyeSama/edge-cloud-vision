@@ -9,10 +9,12 @@
 > v0.2.0 新增 **Edge-Mem**：把事件按时间衰减分层存储，并提供“时间硬过滤 + 语义向量 + RRF 融合”的混合检索，让网关能回答“昨天下午那个穿红衣服的人是什么时候出现的？”
 >
 > v0.3.0 新增 **仪器化层**：采样时钟、端到端延迟/抖动/截止期/丢帧、置信度标定与 conformal 集合、Modbus TCP 联锁、确定性激励台、SPC 漂移监控和事件时间 watermark。
+>
+> v0.4.0 新增 **分条件验收**：温度标定 + 按 false-accept 预算为 clean/blur/occlusion/lowlight/downscale 分别选 accept 门限；在独立测试集上 coverage 28.9% → 35.6%，false accept 0% → 2.2%。
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen.svg)](tests)
-[![Release](https://img.shields.io/badge/release-v0.3.0-blue.svg)](https://github.com/RyeSama/edge-cloud-vision/releases)
+[![Tests](https://img.shields.io/badge/tests-65%20passed-brightgreen.svg)](tests)
+[![Release](https://img.shields.io/badge/release-v0.4.0-blue.svg)](https://github.com/RyeSama/edge-cloud-vision/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -155,6 +157,31 @@ python -m ecvision.edge --source synthetic --max-frames 300 \
 python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
 ```
 
+### v0.4：同一模型，不一定要用同一个门限
+
+v0.3 的标定解决了“softmax 不是概率”，但默认仍然是全局 0.90/0.50。问题是：clean、blur、occlusion、lowlight、downscale 的分数分布根本不一样，用一个门限会同时造成“clean 太保守”和“blur 太激进”。
+
+v0.4 把验收做成可量化的工程权衡：
+
+- **温度标定**：在标定集上拟合 `T=3.22`，降低过度自信；
+- **分条件策略**：在 false-accept 预算（默认 5%）下，为每个条件单独选 accept 门限；
+- **独立测试**：按类别切分 40 张标定 / 45 张测试，测试类别不参与选门限；
+- **报告口径**：同时给 accuracy、coverage、selective accuracy、false accept、ECE，不允许只报一个 accuracy。
+
+45 张测试集上的结果：
+
+| 方案 | coverage | selective accuracy | false accept |
+|---|---:|---:|---:|
+| 原始置信度，全局 0.90 | 0.289 | 1.000 | 0.000 |
+| 温度标定，全局 0.90 | 0.000 | n/a | 0.000 |
+| 温度标定 + 分条件策略 | 0.356 | 0.938 | 0.022 |
+
+分条件策略把 coverage 从 28.9% 提到 35.6%，代价是 2.2% false accept。这个数字不大，但它把“用多少误接受换多少覆盖率”变成了可复现的报表，而不是拍脑袋。
+
+完整数据、门限表和复现命令见 [`docs/measurements/v0.4/README.md`](docs/measurements/v0.4/README.md)。
+
+> 注意：每条件只有 8 张标定图、9 张测试图。这是方法验证，不是出厂参数；真实产线必须用现场标注数据重新标定。
+
 ---
 
 ## 系统架构
@@ -254,9 +281,10 @@ edge-cloud-vision/
 │     ├─ context.py             #   Markdown/JSON 时间轴 + Token 预算
 │     ├─ answer.py              #   可选 LLM 回答（OpenAI 兼容）
 │     └─ service.py             #   编排：入库、查询、压缩、统计
-│  ├─ instrument/               # v0.3：采样时钟、标定、SPC
+│  ├─ instrument/               # v0.3/v0.4：采样时钟、标定、SPC、验收策略
 │  │  ├─ clock.py               #   mono + wall + sync 状态
-│  │  ├─ calibration.py         #   isotonic、ECE/Brier、conformal set
+│  │  ├─ calibration.py         #   isotonic/temperature、ECE/Brier、conformal set
+│  │  ├─ acceptance.py          #   v0.4：分条件 accept 门限 + false-accept 预算
 │  │  └─ spc.py                 #   EWMA/CUSUM + 标签分布漂移
 │  ├─ control/                  # v0.3：Modbus TCP + 联锁
 │  │  ├─ modbus.py              #   纯标准库 Modbus TCP 从站
@@ -265,11 +293,14 @@ edge-cloud-vision/
 │     └─ stimulus.py            #   距离/照度/模糊/遮挡 + 重复性报告
 ├─ examples/minimal_loop.py     # 一屏版端侧骨架：采集→推理→门限→JSON
 ├─ .github/workflows/ci.yml     # GitHub Actions：ruff + pytest
-├─ tests/                       # 57 个单元/接口测试
+├─ tests/                       # 65 个单元/接口测试
 ├─ scripts/download_model.py    # 下载并校验 MobileNetV1 INT8 + ImageNet labels
 ├─ scripts/bench_memory.py      # Edge-Mem 微基准（压缩 + 查询延迟）
 ├─ scripts/bench_stimulus.py    # v0.3 激励矩阵报告
 ├─ scripts/fit_calibration.py   # v0.3 标定 / conformal profile
+├─ scripts/fit_policy.py        # v0.4 分条件 accept 门限
+├─ scripts/split_manifest.py    # v0.4 按类别切分标定/测试集
+├─ scripts/eval_dataset.py      # 带 ground truth 的数据集验收
 ├─ contracts/                   # 语言无关 JSON Schema
 ├─ deploy/mosquitto/            # 本地 broker 配置
 ├─ docs/                        # 协议、架构、ADR、Edge-Mem、仪器化
@@ -423,6 +454,31 @@ python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
 
 完整字段、寄存器映射和验收清单见 [`docs/instrumentation.md`](docs/instrumentation.md)。
 
+### 试用 v0.4 分条件验收
+
+用带 `label` 和 `degradation` 列的 manifest，先切分再标定/选门限：
+
+```bash
+python scripts/split_manifest.py --input data/manifest.csv \
+  --calibration-out data/manifest-cal.csv --test-out data/manifest-test.csv \
+  --calibration-fraction 0.5 --seed 7
+
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-raw
+python scripts/fit_calibration.py --input data/cal-raw/predictions.csv \
+  --method temperature --out data/calibration-v04.json
+
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-temp \
+  --calibration-profile data/calibration-v04.json
+python scripts/fit_policy.py --input data/cal-temp/predictions.csv \
+  --false-accept-budget 0.05 --min-samples 20 --out data/acceptance-policy-v04.json
+
+python scripts/eval_dataset.py --manifest data/manifest-test.csv --out-dir data/test-policy \
+  --calibration-profile data/calibration-v04.json \
+  --policy data/acceptance-policy-v04.json
+```
+
+`--min-samples` 是每个条件的最少标定样本数；少于它时该条件回退到全局默认门限，不硬拟合。完整示例和 85 张图的结果见 [`docs/measurements/v0.4/README.md`](docs/measurements/v0.4/README.md)。
+
 ### 端到端联调
 
 终端 1：
@@ -529,6 +585,16 @@ v0.3 时间链实测（[`docs/measurements/clock-v03.json`](docs/measurements/cl
 
 v0.3 激励台（[`docs/measurements/stimulus.md`](docs/measurements/stimulus.md)，8 场景 × 3 次，真实 MobileNetV1 INT8）：24 个样本全部 `review`，置信度 0.0011–0.0018，推理 p50 8.11–11.76 ms；合成目标无 ground truth，`accuracy` 为 `n/a`。它证明确定性和时序稳定性，不证明识别精度。
 
+v0.4 分条件验收（[`docs/measurements/v0.4/README.md`](docs/measurements/v0.4/README.md)，17 类 × 5 条件，40 张标定 / 45 张测试）：
+
+| 方案 | coverage | selective accuracy | false accept | ECE |
+|---|---:|---:|---:|---:|
+| 原始置信度，全局 0.90 | 0.289 | 1.000 | 0.000 | 0.267 |
+| 温度标定，全局 0.90 | 0.000 | n/a | 0.000 | 0.291 |
+| 温度标定 + 分条件策略 | 0.356 | 0.938 | 0.022 | 0.291 |
+
+每条件只有 8 张标定图，这组数字用于验证“标定 → 按条件选门限 → 独立测试”的流程，不是出厂参数；测试集 ECE 高于标定集，说明类别偏移下标定不是万能药。
+
 ---
 
 ## 测试
@@ -549,6 +615,7 @@ python -m compileall -q src tests
 - topic：发布/订阅解析、错误层级拒绝；
 - Edge-Mem：时间衰减三层边界、中文时间窗解析、RRF 融合、Token 截断、向量失败降级、无 LLM 的 JSON 时间轴；
 - 仪器化：时钟偏移/同步标记、ECE/Brier、isotonic 单调性、conformal 集合、标定门限、SPC 均值偏移/标签漂移；
+- 验收策略：false-accept 预算内选门限、样本不足回退默认、温度标定降低 NLL、按条件覆盖门限；
 - 控制：连续 N 帧确认、最后一次检测后保持、stale → fault → reset、Modbus TCP FC5/FC1/FC3 往返；
 - 事件时间：晚到事件 `late=true`、watermark、检索仍保留；
 - 激励台：确定性渲染、重复性、CSV/Markdown 报告、ground truth 校验。
@@ -569,6 +636,9 @@ GitHub Actions 在 Python 3.10 和 3.12 上执行 `ruff check` 与 `pytest -q`�
 - `metrics` 只统计应用层 payload，不含 TCP/TLS/MQTT 固定头；带宽结论已按此口径标注。
 - 采样时钟默认是系统时钟包装；`ntp/ptp/gps` 只是显式标记，不包含真实授时驱动。要拿到可信绝对时间，需接 NTP/PTP 客户端并监控 offset。
 - 标定需要自备工业场景的标注集；仓库只提供 isotonic/conformal 的实现和验收路径，不提供“已标定”的精度声明。
+- v0.4 的 85 张公开图只是方法验证：每条件 8 张标定、9 张测试，选出的门限方差很大，不能直接当出厂参数。
+- 温度标定是二分类置信度校准（correct vs incorrect），不是多分类 softmax 重标定；测试集 ECE 高于标定集，说明类别/条件偏移下校准会退化。
+- 分条件策略目前是离线验收流程；运行时 `EdgeRunner` 仍用单一门限，除非调用方显式提供条件。不要把离线策略当成已上线的自适应门限。
 - Modbus TCP 是纯标准库模拟从站，**不是安全 PLC**；联锁逻辑可验证，但不能替代硬件安全回路。
 - 激励台默认场景是合成目标，`accuracy=n/a`；真实精度必须用 `--source-image --ground-truth` 的现场数据。
 - SPC 是诊断信号，不是自动停线依据；告警阈值需要按现场基线调整。

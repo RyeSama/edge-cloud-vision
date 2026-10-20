@@ -1,0 +1,196 @@
+{
+  "dataset": {
+    "n": 45,
+    "model": "mobilenet_v1_1.0_224_quant",
+    "gate": {
+      "accept_threshold": 0.9,
+      "review_threshold": 0.5
+    },
+    "manifest": "D:\\dsh-workspace\\_tmp_eval\\manifest-test.csv",
+    "split": null,
+    "condition_column": "degradation"
+  },
+  "headline": {
+    "accuracy": 0.666667,
+    "coverage": 0.288889,
+    "review_rate": 0.711111,
+    "selective_accuracy": 1.0,
+    "false_accept_rate": 0.0,
+    "false_accept_among_accepted": 0.0,
+    "false_review_rate": 0.377778,
+    "conformal_coverage": null,
+    "ece": 0.267217,
+    "brier": 0.248586,
+    "latency_ms": {
+      "p50": 11.44,
+      "p95": 18.469,
+      "p99": 21.241,
+      "max": 21.241
+    }
+  },
+  "gate_reasons": {
+    "low_confidence": 19,
+    "ambiguous": 13,
+    "high_confidence": 13
+  },
+  "conditions": [
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "blur",
+      "n": 9,
+      "accuracy": 0.555556,
+      "coverage": 0.333333,
+      "mean_confidence": 0.364532,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "clean",
+      "n": 9,
+      "accuracy": 0.888889,
+      "coverage": 0.333333,
+      "mean_confidence": 0.630556,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "downscale",
+      "n": 9,
+      "accuracy": 0.555556,
+      "coverage": 0.333333,
+      "mean_confidence": 0.526045,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "occlusion",
+      "n": 9,
+      "accuracy": 0.555556,
+      "coverage": 0.0,
+      "mean_confidence": 0.483481,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "80",
+      "degradation": "lowlight",
+      "n": 9,
+      "accuracy": 0.777778,
+      "coverage": 0.444444,
+      "mean_confidence": 0.574234,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    }
+  ],
+  "confusion": {
+    "Persian cat": {
+      "Persian cat": 2,
+      "tiger cat": 2,
+      "llama": 1
+    },
+    "Samoyed": {
+      "Samoyed": 5
+    },
+    "car wheel": {
+      "car wheel": 5
+    },
+    "cellular telephone": {
+      "hand-held computer": 3,
+      "cellular telephone": 2
+    },
+    "coffee mug": {
+      "coffee mug": 5
+    },
+    "desk": {
+      "desk": 3,
+      "barbell": 1,
+      "shoe shop": 1
+    },
+    "electric fan": {
+      "electric fan": 2,
+      "tape player": 2,
+      "microwave": 1
+    },
+    "laptop": {
+      "laptop": 2,
+      "potter's wheel": 2,
+      "notebook": 1
+    },
+    "sports car": {
+      "sports car": 4,
+      "convertible": 1
+    }
+  },
+  "warnings": [],
+  "reliability_bins": [
+    {
+      "lower": 0.0,
+      "upper": 0.1,
+      "count": 15,
+      "avg_confidence": 0.001475,
+      "accuracy": 0.533333
+    },
+    {
+      "lower": 0.3,
+      "upper": 0.4,
+      "count": 3,
+      "avg_confidence": 0.36849,
+      "accuracy": 0.0
+    },
+    {
+      "lower": 0.4,
+      "upper": 0.5,
+      "count": 1,
+      "avg_confidence": 0.484375,
+      "accuracy": 0.0
+    },
+    {
+      "lower": 0.5,
+      "upper": 0.6,
+      "count": 1,
+      "avg_confidence": 0.511719,
+      "accuracy": 0.0
+    },
+    {
+      "lower": 0.6,
+      "upper": 0.7,
+      "count": 6,
+      "avg_confidence": 0.652995,
+      "accuracy": 0.666667
+    },
+    {
+      "lower": 0.7,
+      "upper": 0.8,
+      "count": 3,
+      "avg_confidence": 0.744792,
+      "accuracy": 1.0
+    },
+    {
+      "lower": 0.8,
+      "upper": 0.9,
+      "count": 3,
+      "avg_confidence": 0.838542,
+      "accuracy": 0.666667
+    },
+    {
+      "lower": 0.9,
+      "upper": 1.0,
+      "count": 13,
+      "avg_confidence": 0.955229,
+      "accuracy": 1.0
+    }
+  ],
+  "calibration": {
+    "profile": null,
+    "conformal": null
+  },
+  "policy": null
+}

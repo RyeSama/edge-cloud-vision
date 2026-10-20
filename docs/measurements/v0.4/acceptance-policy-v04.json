@@ -1,0 +1,77 @@
+{
+  "version": "policy-v1",
+  "dataset_id": "local-calibration",
+  "calibration_profile_version": null,
+  "false_accept_budget": 0.05,
+  "min_samples": 8,
+  "default": {
+    "condition": "default",
+    "accept_threshold": 0.49636,
+    "review_threshold": 0.49636,
+    "n": 40,
+    "coverage": 0.425,
+    "false_accept_rate": 0.05,
+    "false_accept_among_accepted": 0.11764705882352941,
+    "selective_accuracy": 0.8823529411764706,
+    "source": "default"
+  },
+  "conditions": {
+    "blur": {
+      "condition": "blur",
+      "accept_threshold": 0.660145,
+      "review_threshold": 0.5,
+      "n": 8,
+      "coverage": 0.25,
+      "false_accept_rate": 0.0,
+      "false_accept_among_accepted": 0.0,
+      "selective_accuracy": 1.0,
+      "source": "fitted"
+    },
+    "clean": {
+      "condition": "clean",
+      "accept_threshold": 0.514596,
+      "review_threshold": 0.5,
+      "n": 8,
+      "coverage": 0.5,
+      "false_accept_rate": 0.0,
+      "false_accept_among_accepted": 0.0,
+      "selective_accuracy": 1.0,
+      "source": "fitted"
+    },
+    "downscale": {
+      "condition": "downscale",
+      "accept_threshold": 0.771386,
+      "review_threshold": 0.5,
+      "n": 8,
+      "coverage": 0.25,
+      "false_accept_rate": 0.0,
+      "false_accept_among_accepted": 0.0,
+      "selective_accuracy": 1.0,
+      "source": "fitted"
+    },
+    "lowlight": {
+      "condition": "lowlight",
+      "accept_threshold": 0.663072,
+      "review_threshold": 0.5,
+      "n": 8,
+      "coverage": 0.375,
+      "false_accept_rate": 0.0,
+      "false_accept_among_accepted": 0.0,
+      "selective_accuracy": 1.0,
+      "source": "fitted"
+    },
+    "occlusion": {
+      "condition": "occlusion",
+      "accept_threshold": 0.592529,
+      "review_threshold": 0.5,
+      "n": 8,
+      "coverage": 0.375,
+      "false_accept_rate": 0.0,
+      "false_accept_among_accepted": 0.0,
+      "selective_accuracy": 1.0,
+      "source": "fitted"
+    }
+  },
+  "notes": [],
+  "created_at": "2026-10-20T15:25:26.945428Z"
+}

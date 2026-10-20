@@ -1,0 +1,14 @@
+{
+  "version": "cal-v1",
+  "method": "temperature",
+  "temperature": 3.22,
+  "x": [],
+  "y": [],
+  "ece": 0.158007,
+  "brier": 0.15337,
+  "nll": 0.492228,
+  "n": 40,
+  "bins": 10,
+  "dataset_id": "imagenet-85-cal",
+  "created_at": "2026-10-20T15:25:15.435241Z"
+}

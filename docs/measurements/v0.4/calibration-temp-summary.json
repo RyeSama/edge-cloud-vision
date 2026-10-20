@@ -1,0 +1,184 @@
+{
+  "dataset": {
+    "n": 40,
+    "model": "mobilenet_v1_1.0_224_quant",
+    "gate": {
+      "accept_threshold": 0.9,
+      "review_threshold": 0.5
+    },
+    "manifest": "D:\\dsh-workspace\\_tmp_eval\\manifest-cal.csv",
+    "split": null,
+    "condition_column": "degradation"
+  },
+  "headline": {
+    "accuracy": 0.475,
+    "coverage": 0.0,
+    "review_rate": 1.0,
+    "selective_accuracy": null,
+    "false_accept_rate": 0.0,
+    "false_accept_among_accepted": null,
+    "false_review_rate": 0.475,
+    "conformal_coverage": null,
+    "ece": 0.158007,
+    "brier": 0.153369,
+    "latency_ms": {
+      "p50": 12.19,
+      "p95": 16.091,
+      "p99": 17.363,
+      "max": 17.363
+    }
+  },
+  "gate_reasons": {
+    "low_confidence": 24,
+    "ambiguous": 16
+  },
+  "conditions": [
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "blur",
+      "n": 8,
+      "accuracy": 0.25,
+      "coverage": 0.0,
+      "mean_confidence": 0.272379,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "clean",
+      "n": 8,
+      "accuracy": 0.75,
+      "coverage": 0.0,
+      "mean_confidence": 0.456617,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "downscale",
+      "n": 8,
+      "accuracy": 0.5,
+      "coverage": 0.0,
+      "mean_confidence": 0.343459,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "occlusion",
+      "n": 8,
+      "accuracy": 0.375,
+      "coverage": 0.0,
+      "mean_confidence": 0.37125,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    },
+    {
+      "distance_m": "",
+      "lux": "80",
+      "degradation": "lowlight",
+      "n": 8,
+      "accuracy": 0.5,
+      "coverage": 0.0,
+      "mean_confidence": 0.483968,
+      "accept_threshold": 0.9,
+      "policy_source": "global"
+    }
+  ],
+  "confusion": {
+    "airliner": {
+      "airliner": 3,
+      "flagpole": 1,
+      "racer": 1
+    },
+    "bicycle-built-for-two": {
+      "bicycle-built-for-two": 5
+    },
+    "computer keyboard": {
+      "typewriter keyboard": 2,
+      "computer keyboard": 1,
+      "remote control": 1,
+      "space bar": 1
+    },
+    "digital clock": {
+      "digital clock": 5
+    },
+    "microphone": {
+      "espresso maker": 2,
+      "face powder": 1,
+      "frying pan": 1,
+      "microphone": 1
+    },
+    "minibus": {
+      "minibus": 2,
+      "limousine": 1,
+      "moving van": 1,
+      "passenger car": 1
+    },
+    "monitor": {
+      "shopping cart": 2,
+      "planetarium": 1,
+      "prison": 1,
+      "stage": 1
+    },
+    "mountain bike": {
+      "mountain bike": 2,
+      "parachute": 2,
+      "notebook": 1
+    }
+  },
+  "warnings": [],
+  "reliability_bins": [
+    {
+      "lower": 0.1,
+      "upper": 0.2,
+      "count": 19,
+      "avg_confidence": 0.115055,
+      "accuracy": 0.210526
+    },
+    {
+      "lower": 0.4,
+      "upper": 0.5,
+      "count": 5,
+      "avg_confidence": 0.447802,
+      "accuracy": 0.2
+    },
+    {
+      "lower": 0.5,
+      "upper": 0.6,
+      "count": 4,
+      "avg_confidence": 0.531031,
+      "accuracy": 0.5
+    },
+    {
+      "lower": 0.6,
+      "upper": 0.7,
+      "count": 4,
+      "avg_confidence": 0.643274,
+      "accuracy": 1.0
+    },
+    {
+      "lower": 0.7,
+      "upper": 0.8,
+      "count": 6,
+      "avg_confidence": 0.764541,
+      "accuracy": 1.0
+    },
+    {
+      "lower": 0.8,
+      "upper": 0.9,
+      "count": 2,
+      "avg_confidence": 0.848243,
+      "accuracy": 1.0
+    }
+  ],
+  "calibration": {
+    "profile": "D:\\dsh-workspace\\_tmp_eval\\calibration-v04.json",
+    "conformal": null
+  },
+  "policy": null
+}

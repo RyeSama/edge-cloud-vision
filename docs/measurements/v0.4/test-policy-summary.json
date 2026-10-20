@@ -1,0 +1,262 @@
+{
+  "dataset": {
+    "n": 45,
+    "model": "mobilenet_v1_1.0_224_quant",
+    "gate": {
+      "accept_threshold": 0.9,
+      "review_threshold": 0.5
+    },
+    "manifest": "D:\\dsh-workspace\\_tmp_eval\\manifest-test.csv",
+    "split": null,
+    "condition_column": "degradation"
+  },
+  "headline": {
+    "accuracy": 0.666667,
+    "coverage": 0.355556,
+    "review_rate": 0.644444,
+    "selective_accuracy": 0.9375,
+    "false_accept_rate": 0.022222,
+    "false_accept_among_accepted": 0.0625,
+    "false_review_rate": 0.333333,
+    "conformal_coverage": null,
+    "ece": 0.29054,
+    "brier": 0.243827,
+    "latency_ms": {
+      "p50": 11.796,
+      "p95": 16.886,
+      "p99": 19.263,
+      "max": 19.263
+    }
+  },
+  "gate_reasons": {
+    "low_confidence": 19,
+    "high_confidence": 16,
+    "ambiguous": 10
+  },
+  "conditions": [
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "blur",
+      "n": 9,
+      "accuracy": 0.555556,
+      "coverage": 0.333333,
+      "mean_confidence": 0.364532,
+      "accept_threshold": 0.660145,
+      "policy_source": "fitted"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "clean",
+      "n": 9,
+      "accuracy": 0.888889,
+      "coverage": 0.666667,
+      "mean_confidence": 0.630556,
+      "accept_threshold": 0.514596,
+      "policy_source": "fitted"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "downscale",
+      "n": 9,
+      "accuracy": 0.555556,
+      "coverage": 0.111111,
+      "mean_confidence": 0.526045,
+      "accept_threshold": 0.771386,
+      "policy_source": "fitted"
+    },
+    {
+      "distance_m": "",
+      "lux": "500",
+      "degradation": "occlusion",
+      "n": 9,
+      "accuracy": 0.555556,
+      "coverage": 0.222222,
+      "mean_confidence": 0.483481,
+      "accept_threshold": 0.592529,
+      "policy_source": "fitted"
+    },
+    {
+      "distance_m": "",
+      "lux": "80",
+      "degradation": "lowlight",
+      "n": 9,
+      "accuracy": 0.777778,
+      "coverage": 0.444444,
+      "mean_confidence": 0.574234,
+      "accept_threshold": 0.663072,
+      "policy_source": "fitted"
+    }
+  ],
+  "confusion": {
+    "Persian cat": {
+      "Persian cat": 2,
+      "tiger cat": 2,
+      "llama": 1
+    },
+    "Samoyed": {
+      "Samoyed": 5
+    },
+    "car wheel": {
+      "car wheel": 5
+    },
+    "cellular telephone": {
+      "hand-held computer": 3,
+      "cellular telephone": 2
+    },
+    "coffee mug": {
+      "coffee mug": 5
+    },
+    "desk": {
+      "desk": 3,
+      "barbell": 1,
+      "shoe shop": 1
+    },
+    "electric fan": {
+      "electric fan": 2,
+      "tape player": 2,
+      "microwave": 1
+    },
+    "laptop": {
+      "laptop": 2,
+      "potter's wheel": 2,
+      "notebook": 1
+    },
+    "sports car": {
+      "sports car": 4,
+      "convertible": 1
+    }
+  },
+  "warnings": [],
+  "reliability_bins": [
+    {
+      "lower": 0.1,
+      "upper": 0.2,
+      "count": 15,
+      "avg_confidence": 0.116323,
+      "accuracy": 0.533333
+    },
+    {
+      "lower": 0.4,
+      "upper": 0.5,
+      "count": 4,
+      "avg_confidence": 0.467419,
+      "accuracy": 0.0
+    },
+    {
+      "lower": 0.5,
+      "upper": 0.6,
+      "count": 10,
+      "avg_confidence": 0.554697,
+      "accuracy": 0.7
+    },
+    {
+      "lower": 0.6,
+      "upper": 0.7,
+      "count": 10,
+      "avg_confidence": 0.673358,
+      "accuracy": 0.9
+    },
+    {
+      "lower": 0.7,
+      "upper": 0.8,
+      "count": 3,
+      "avg_confidence": 0.741756,
+      "accuracy": 1.0
+    },
+    {
+      "lower": 0.8,
+      "upper": 0.9,
+      "count": 3,
+      "avg_confidence": 0.848243,
+      "accuracy": 1.0
+    }
+  ],
+  "calibration": {
+    "profile": "D:\\dsh-workspace\\_tmp_eval\\calibration-v04.json",
+    "conformal": null
+  },
+  "policy": {
+    "path": "D:\\dsh-workspace\\_tmp_eval\\acceptance-policy-v04.json",
+    "version": "policy-v1",
+    "false_accept_budget": 0.05,
+    "min_samples": 8,
+    "conditions": [
+      {
+        "condition": "blur",
+        "accept_threshold": 0.660145,
+        "review_threshold": 0.5,
+        "n": 8,
+        "coverage": 0.25,
+        "false_accept_rate": 0.0,
+        "false_accept_among_accepted": 0.0,
+        "selective_accuracy": 1.0,
+        "wilson_lower_false_accept": 0.0,
+        "source": "fitted"
+      },
+      {
+        "condition": "clean",
+        "accept_threshold": 0.514596,
+        "review_threshold": 0.5,
+        "n": 8,
+        "coverage": 0.5,
+        "false_accept_rate": 0.0,
+        "false_accept_among_accepted": 0.0,
+        "selective_accuracy": 1.0,
+        "wilson_lower_false_accept": 0.0,
+        "source": "fitted"
+      },
+      {
+        "condition": "default",
+        "accept_threshold": 0.49636,
+        "review_threshold": 0.49636,
+        "n": 40,
+        "coverage": 0.425,
+        "false_accept_rate": 0.05,
+        "false_accept_among_accepted": 0.11764705882352941,
+        "selective_accuracy": 0.8823529411764706,
+        "wilson_lower_false_accept": 0.013820377146101093,
+        "source": "default"
+      },
+      {
+        "condition": "downscale",
+        "accept_threshold": 0.771386,
+        "review_threshold": 0.5,
+        "n": 8,
+        "coverage": 0.25,
+        "false_accept_rate": 0.0,
+        "false_accept_among_accepted": 0.0,
+        "selective_accuracy": 1.0,
+        "wilson_lower_false_accept": 0.0,
+        "source": "fitted"
+      },
+      {
+        "condition": "lowlight",
+        "accept_threshold": 0.663072,
+        "review_threshold": 0.5,
+        "n": 8,
+        "coverage": 0.375,
+        "false_accept_rate": 0.0,
+        "false_accept_among_accepted": 0.0,
+        "selective_accuracy": 1.0,
+        "wilson_lower_false_accept": 0.0,
+        "source": "fitted"
+      },
+      {
+        "condition": "occlusion",
+        "accept_threshold": 0.592529,
+        "review_threshold": 0.5,
+        "n": 8,
+        "coverage": 0.375,
+        "false_accept_rate": 0.0,
+        "false_accept_among_accepted": 0.0,
+        "selective_accuracy": 1.0,
+        "wilson_lower_false_accept": 0.0,
+        "source": "fitted"
+      }
+    ],
+    "notes": []
+  }
+}

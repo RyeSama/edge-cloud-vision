@@ -47,14 +47,22 @@ class ReliabilityBin(StrictModel):
 
 
 class CalibrationProfile(StrictModel):
-    """Piecewise-linear isotonic map plus its held-out diagnostics."""
+    """Calibration map plus its held-out diagnostics.
+
+    ``method="temperature"`` applies a single-parameter logistic rescaling to
+    the top-1 confidence. It is a binary-confidence calibration (correct vs
+    incorrect), not a re-run of multiclass softmax; use isotonic when the
+    reliability curve is clearly non-monotone and the calibration set is large.
+    """
 
     version: str = Field(default="cal-v1", min_length=1, max_length=64)
-    method: Literal["identity", "isotonic"] = "identity"
+    method: Literal["identity", "isotonic", "temperature"] = "identity"
+    temperature: float = Field(default=1.0, gt=0.0, le=20.0)
     x: list[float] = Field(default_factory=list, max_length=256)
     y: list[float] = Field(default_factory=list, max_length=256)
     ece: float = Field(default=0.0, ge=0.0, le=1.0)
     brier: float = Field(default=0.0, ge=0.0, le=1.0)
+    nll: float = Field(default=0.0, ge=0.0)
     n: int = Field(default=0, ge=0)
     bins: int = Field(default=10, ge=2, le=50)
     dataset_id: str = Field(default="unknown", min_length=1, max_length=200)
@@ -70,11 +78,15 @@ class CalibrationProfile(StrictModel):
             raise ValueError("calibration x values must be strictly increasing")
         if any(b < a for a, b in zip(self.y, self.y[1:], strict=False)):
             raise ValueError("isotonic y values must be non-decreasing")
+        if self.method == "temperature" and self.x:
+            raise ValueError("temperature profiles must not carry an isotonic curve")
         return self
 
     def apply(self, confidence: float) -> float:
         if not 0.0 <= confidence <= 1.0:
             raise ValueError("confidence must be in [0, 1]")
+        if self.method == "temperature":
+            return _temperature_scale(confidence, self.temperature)
         if self.method == "identity" or not self.x:
             return confidence
         if confidence <= self.x[0]:
@@ -152,6 +164,119 @@ def brier_score(confidences: Sequence[float], correct: Sequence[bool]) -> float:
     )
 
 
+def negative_log_likelihood(confidences: Sequence[float], correct: Sequence[bool]) -> float:
+    """Binary NLL of the confidence as a probability of being correct."""
+    if len(confidences) != len(correct):
+        raise ValueError("confidences and correct must have equal length")
+    if not confidences:
+        return 0.0
+    epsilon = 1e-9
+    total = 0.0
+    for confidence, truth in zip(confidences, correct, strict=False):
+        p = min(1.0 - epsilon, max(epsilon, confidence))
+        total -= math.log(p) if truth else math.log(1.0 - p)
+    return round(total / len(confidences), 6)
+
+
+def _logit(confidence: float) -> float:
+    p = min(1.0 - 1e-9, max(1e-9, confidence))
+    return math.log(p / (1.0 - p))
+
+
+def _sigmoid(value: float) -> float:
+    if value >= 0:
+        z = math.exp(-value)
+        return 1.0 / (1.0 + z)
+    z = math.exp(value)
+    return z / (1.0 + z)
+
+
+def _temperature_scale(confidence: float, temperature: float) -> float:
+    if temperature <= 0:
+        raise ValueError("temperature must be > 0")
+    return _sigmoid(_logit(confidence) / temperature)
+
+
+def fit_temperature(
+    points: Sequence[CalibrationPoint],
+    *,
+    dataset_id: str = "unknown",
+    bins: int = 10,
+    version: str = "cal-v1",
+    minimum: float = 0.5,
+    maximum: float = 5.0,
+    step: float = 0.01,
+) -> CalibrationProfile:
+    """Fit a single temperature by grid search on binary NLL.
+
+    No scipy dependency: the objective is one-dimensional and smooth enough
+    that a 0.01 grid is adequate for a reportable engineering baseline. The
+    fitted value is diagnostic, not a claim of state-of-the-art calibration.
+    """
+    if minimum <= 0 or maximum <= minimum or step <= 0:
+        raise ValueError("require 0 < minimum < maximum and step > 0")
+    usable = [p for p in points if 0.0 <= p.confidence <= 1.0]
+    if not usable:
+        return CalibrationProfile(
+            version=version, method="identity", dataset_id=dataset_id, bins=bins
+        )
+
+    best_temperature = 1.0
+    best_nll = float("inf")
+    steps = int(round((maximum - minimum) / step))
+    for index in range(steps + 1):
+        temperature = minimum + index * step
+        calibrated = [_temperature_scale(point.confidence, temperature) for point in usable]
+        value = negative_log_likelihood(calibrated, [point.correct for point in usable])
+        if value < best_nll:
+            best_nll = value
+            best_temperature = temperature
+
+    calibrated = [_temperature_scale(point.confidence, best_temperature) for point in usable]
+    truth = [point.correct for point in usable]
+    return CalibrationProfile(
+        version=version,
+        method="temperature",
+        temperature=round(best_temperature, 4),
+        ece=expected_calibration_error(calibrated, truth, bins=bins),
+        brier=brier_score(calibrated, truth),
+        nll=negative_log_likelihood(calibrated, truth),
+        n=len(usable),
+        bins=bins,
+        dataset_id=dataset_id,
+    )
+
+
+def fit_calibration(
+    points: Sequence[CalibrationPoint],
+    *,
+    method: str = "isotonic",
+    dataset_id: str = "unknown",
+    bins: int = 10,
+    version: str = "cal-v1",
+) -> CalibrationProfile:
+    """Dispatch to isotonic or temperature calibration."""
+    if method == "temperature":
+        return fit_temperature(points, dataset_id=dataset_id, bins=bins, version=version)
+    if method == "isotonic":
+        return fit_isotonic(points, dataset_id=dataset_id, bins=bins, version=version)
+    if method == "identity":
+        usable = [p for p in points if 0.0 <= p.confidence <= 1.0]
+        truth = [p.correct for p in usable]
+        confidences = [p.confidence for p in usable]
+        return CalibrationProfile(
+            version=version,
+            method="identity",
+            ece=expected_calibration_error(confidences, truth, bins=bins),
+            brier=brier_score(confidences, truth),
+            nll=negative_log_likelihood(confidences, truth),
+            n=len(usable),
+            bins=bins,
+            dataset_id=dataset_id,
+        )
+    raise ValueError(f"unknown calibration method: {method}")
+
+
 def fit_isotonic(
     points: Sequence[CalibrationPoint],
     *,
@@ -216,6 +341,7 @@ def fit_isotonic(
         update={
             "ece": expected_calibration_error(calibrated, truth, bins=bins),
             "brier": brier_score(calibrated, truth),
+            "nll": negative_log_likelihood(calibrated, truth),
         }
     )
 
@@ -296,9 +422,11 @@ class CalibrationGate:
         *,
         probabilities: Sequence[float] | None = None,
         labels: Sequence[str] | None = None,
+        config: GateConfig | None = None,
     ) -> CalibrationDecision:
         if not candidates:
             raise ValueError("at least one candidate is required")
+        cfg = config or self._config
         top1 = candidates[0]
         calibrated = (
             self._profile.apply(top1.confidence) if self._profile is not None else top1.confidence
@@ -330,9 +458,9 @@ class CalibrationGate:
 
         if len(selected) > 1:
             gate = GateResult(GateDecision.REVIEW, GateReason.AMBIGUOUS)
-        elif calibrated >= self._config.accept_threshold:
+        elif calibrated >= cfg.accept_threshold:
             gate = GateResult(GateDecision.ACCEPT, GateReason.HIGH_CONFIDENCE)
-        elif calibrated >= self._config.review_threshold:
+        elif calibrated >= cfg.review_threshold:
             gate = GateResult(GateDecision.REVIEW, GateReason.AMBIGUOUS)
         else:
             gate = GateResult(GateDecision.REVIEW, GateReason.LOW_CONFIDENCE)
@@ -346,10 +474,14 @@ class CalibrationGate:
             warnings=tuple(warnings),
         )
 
-    def evaluate_confidence(self, confidence: float) -> CalibrationDecision:
+    def evaluate_confidence(
+        self, confidence: float, *, config: GateConfig | None = None
+    ) -> CalibrationDecision:
         """Convenience path for callers that only have the top-1 score."""
         return self.evaluate(
-            [Candidate(label_id=0, label="top1", confidence=confidence)], probabilities=None
+            [Candidate(label_id=0, label="top1", confidence=confidence)],
+            probabilities=None,
+            config=config,
         )
 
 

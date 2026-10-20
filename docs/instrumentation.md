@@ -114,6 +114,29 @@ calibrated < 0.50             → review / low_confidence
 
 **不要**在没有标定集时声称“置信度 0.9 = 准确率 90%”。本仓库只提供方法和可执行路径，不提供工业标定数据。
 
+### 2.1 分条件验收（v0.4）
+
+全局门限把 clean、blur、occlusion、lowlight、downscale 当成同一种分布，结果通常是“clean 太保守、blur 太激进”。`AcceptancePolicy` 在 false-accept 预算下，为每个条件单独选 accept 门限：
+
+```bash
+python scripts/split_manifest.py --input data/manifest.csv \
+  --calibration-out data/manifest-cal.csv --test-out data/manifest-test.csv
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-raw
+python scripts/fit_calibration.py --input data/cal-raw/predictions.csv \
+  --method temperature --out data/calibration-v04.json
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-temp \
+  --calibration-profile data/calibration-v04.json
+python scripts/fit_policy.py --input data/cal-temp/predictions.csv \
+  --false-accept-budget 0.05 --min-samples 20 --out data/acceptance-policy-v04.json
+python scripts/eval_dataset.py --manifest data/manifest-test.csv --out-dir data/test-policy \
+  --calibration-profile data/calibration-v04.json \
+  --policy data/acceptance-policy-v04.json
+```
+
+`select_threshold` 从高到低扫描候选门限，保留“观测 false-accept ≤ 预算”的最低门限；样本数小于 `min_samples` 的条件回退全局默认，并在 policy `notes` 里说明。报告同时给 coverage、selective accuracy、false-accept 和 ECE，不允许只报 accuracy。
+
+本仓库的 85 张公开图结果：每条件 8 张标定 / 9 张测试，温度 `T=3.22`；测试集 coverage 28.9% → 35.6%，selective accuracy 100% → 93.8%，false accept 0% → 2.2%。完整数据见 [`measurements/v0.4/README.md`](measurements/v0.4/README.md)。
+
 ## 3. Modbus TCP 与联锁
 
 `ModbusTcpServer` 是纯标准库的 Modbus TCP 子集（FC 1/3/4/5/6/15/16），默认监听 `127.0.0.1:15020`。寄存器映射：
