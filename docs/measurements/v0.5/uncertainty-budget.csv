@@ -1,0 +1,5 @@
+name,standard_uncertainty_mm,sensitivity,contribution_mm,share_pct,distribution,note
+pixel localization + plane pose,0.6095768117513923,1.0,0.6095768117513923,97.15020676651595,normal,Monte Carlo over checkerboard corners and measurement endpoints
+calibration scale,0.1,1.0,0.1,2.614489205031227,normal,0.1% of a 100 mm measurand; replace with the real calibration covariance
+target flatness / placement,0.03,1.0,0.03,0.23530402845281037,rectangular,assumed 0.03 mm standard uncertainty for a flat printed target
+combined,0.6184528190775691,1.0,0.6184528190775691,100.0,normal,expanded U(k=2.0) = 1.236906 mm

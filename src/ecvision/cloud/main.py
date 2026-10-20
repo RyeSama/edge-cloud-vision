@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Edge-Cloud Vision Gateway",
-    version="0.4.0",
+    version="0.5.0",
     description="Receives edge JSON events, escalates low-confidence cases to an LLM, degrades safely.",
     lifespan=lifespan,
 )

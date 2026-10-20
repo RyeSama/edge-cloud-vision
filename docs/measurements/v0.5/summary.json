@@ -1,0 +1,15 @@
+{
+  "calibration_rms_px": 0.1384282085454906,
+  "fx": 906.6293803171927,
+  "fy": 907.0186805796267,
+  "cx": 646.1166592903986,
+  "cy": 361.57112962451407,
+  "measurement_value_mm": 100.08987303385585,
+  "measurement_sigma_mm": 0.6095768117513923,
+  "error_mean_mm": 0.017500666666666668,
+  "error_rms_mm": 0.06956438330664144,
+  "combined_standard_uncertainty_mm": 0.6184528190775691,
+  "expanded_uncertainty_mm": 1.2369056381551382,
+  "gauge_grr_mm": 0.022985168082647778,
+  "gauge_pct_tolerance": 13.791100849588666
+}

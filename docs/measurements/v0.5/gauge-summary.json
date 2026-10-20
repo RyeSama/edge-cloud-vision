@@ -1,0 +1,14 @@
+{
+  "n": 30,
+  "parts": 5,
+  "operators": 2,
+  "trials": 3,
+  "mean_mm": 20.214643101760334,
+  "repeatability_std_mm": 0.009670400253120128,
+  "reproducibility_std_mm": 0.020851889859962915,
+  "grr_std_mm": 0.022985168082647778,
+  "part_std_mm": 0.1555090297780129,
+  "ndc": 9,
+  "tolerance_mm": 1.0,
+  "grr_pct_tolerance": 13.791100849588666
+}

@@ -8,6 +8,8 @@
 | [edge-mem.md](edge-mem.md) | v0.2 的时间衰减、SQLite/向量混合存储、RRF 检索、Token 预算和降级 |
 | [instrumentation.md](instrumentation.md) | v0.3 的采样时钟、延迟/抖动/截止期、标定与 conformal、Modbus 联锁、激励台、SPC、事件时间 |
 | [measurements/v0.4/README.md](measurements/v0.4/README.md) | v0.4 的温度标定、分条件 accept 门限、false-accept 预算和独立测试结果 |
+| [metrology.md](metrology.md) | v0.5 的相机标定、平面测量、像素到毫米、不确定度和 Gauge R&R |
+| [measurements/v0.5/README.md](measurements/v0.5/README.md) | v0.5 合成相机验证的真实数字、口径和限制 |
 | [protocol.md](protocol.md) | MQTT topic、QoS、心跳、离线缓冲、去重、错误处理的具体约定 |
 | [adr/0001-mqtt-vs-socket.md](adr/0001-mqtt-vs-socket.md) | 为什么主线选 MQTT 而不是裸 Socket/WebSocket/ZeroMQ？ |
 | [measurements/README.md](measurements/README.md) | 1000 帧带宽实验的口径、命令和原始结果 |
@@ -22,6 +24,7 @@
 5. **记忆检索必须可降级。** 时间窗先做 SQLite 硬过滤；向量检索失败回退文本查询并标记 `degraded`；没有 LLM 时返回 JSON 时间轴，而不是 500。
 6. **测量结论必须带口径。** 延迟区分 capture→emit 与 capture→publish；置信度只有经过标定才称为概率；时间戳区分 `synced/unsynced`；控制输出必须经过联锁，不能把模型结果直接当执行信号。
 7. **分条件验收必须有预算。** 每个条件单独选 accept 门限时，必须同时报告 coverage、selective accuracy 和 false-accept；样本不足 `min_samples` 时回退全局默认，不硬拟合。
+8. **毫米数字必须带平面假设和不确定度。** v0.5 只测与棋盘格共面的距离；合成验证不能冒充真实精度；没有 U(k=2) 和对照基准的“0.07 mm”不算测量结果。
 
 ## 复现实验
 
@@ -65,6 +68,15 @@ python scripts/fit_policy.py --input data/cal-temp/predictions.csv \
 python scripts/eval_dataset.py --manifest data/manifest-test.csv --out-dir data/test-policy \
   --calibration-profile data/calibration-v04.json \
   --policy data/acceptance-policy-v04.json
+
+# 8) v0.5 平面测量：合成验证一次跑完（标定、测距、不确定度、Gauge）
+python scripts/metrology_demo.py --out docs/measurements/v0.5
+
+# 8b) 真实棋盘格标定 + 同平面两点测距
+python scripts/calibrate_camera.py --images "data/calib/*.jpg" \
+  --cols 9 --rows 6 --square-mm 25 --out data/camera.json
+python scripts/measure_checkerboard.py --camera data/camera.json \
+  --image data/measure/scene.jpg --a 412,308 --b 690,312
 ```
 
 ## 已知限制

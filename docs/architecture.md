@@ -35,6 +35,8 @@
   `Answerer` Protocol 注入；默认实现可离线跑，Chroma 是可选适配器。
 - `instrument` 只依赖标准库，负责时钟、标定和 SPC；不 import `edge`/`cloud`。
 - `control` 只依赖标准库，Modbus TCP 从站和联锁状态机可以脱离视觉单测。
+- `metrology` 只依赖 numpy/OpenCV，负责相机内参、平面位姿、毫米反投影、不确定度和 Gauge；
+  不 import `edge`/`cloud`。`scripts/metrology_demo.py` 是唯一把合成相机与测量链串起来的地方。
 - `bench` 只依赖 `Classifier` Protocol 和 numpy/OpenCV，用来产生确定性激励，不 import `EdgeRunner`。
 - `edge.pipeline` 是唯一把采集、推理、门限、仪器化、联锁串起来的地方；它通过构造参数接收
   `SamplingClock`、`CalibrationGate`、`SpcMonitor`、`InterlockController`，不直接 new 这些对象。
