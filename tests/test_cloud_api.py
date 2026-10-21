@@ -114,3 +114,12 @@ def test_memory_api_ingests_queries_and_compresses(monkeypatch):
         report = client.post("/api/v1/memory/compress", json={})
         assert report.status_code == 200
         assert report.json()["errors"] == []
+
+
+def test_dashboard_is_served_without_a_build_step(monkeypatch):
+    with _client(monkeypatch) as client:
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        assert "Edge-Cloud 视觉测量上位机" in response.text
+        assert "等待事件" in response.text
+        assert client.get("/").json()["dashboard"] == "/dashboard"

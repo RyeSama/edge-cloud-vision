@@ -154,3 +154,23 @@ class EventRecord(StrictModel):
     event: Event
     decision: Decision | None = None
     received_at: datetime = Field(default_factory=utc_now)
+
+
+class SensorReading(StrictModel):
+    """One line from a small sensor board over UART.
+
+    The board has no RTC. ``t_us`` is a monotonic microsecond counter since
+    boot; the host records arrival wall time separately. ``boot_id`` lets the
+    host distinguish a reboot from a sequence gap. ``lux``/``distance_mm`` are
+    optional because not every board carries every sensor.
+    """
+
+    schema_version: Literal["1.0"] = "1.0"
+    kind: Literal["sensor"] = "sensor"
+    device_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    boot_id: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_.:-]+$")
+    seq: int = Field(ge=0)
+    t_us: int = Field(ge=0)
+    lux: float | None = Field(default=None, ge=0.0, le=200_000.0)
+    distance_mm: float | None = Field(default=None, ge=0.0, le=10_000.0)
+    trigger: bool = False

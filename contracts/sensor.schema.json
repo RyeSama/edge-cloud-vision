@@ -1,0 +1,85 @@
+{
+  "additionalProperties": false,
+  "description": "One line from a small sensor board over UART.\n\nThe board has no RTC. ``t_us`` is a monotonic microsecond counter since\nboot; the host records arrival wall time separately. ``boot_id`` lets the\nhost distinguish a reboot from a sequence gap. ``lux``/``distance_mm`` are\noptional because not every board carries every sensor.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "kind": {
+      "const": "sensor",
+      "default": "sensor",
+      "title": "Kind",
+      "type": "string"
+    },
+    "device_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.:-]+$",
+      "title": "Device Id",
+      "type": "string"
+    },
+    "boot_id": {
+      "maxLength": 32,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.:-]+$",
+      "title": "Boot Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "t_us": {
+      "minimum": 0,
+      "title": "T Us",
+      "type": "integer"
+    },
+    "lux": {
+      "anyOf": [
+        {
+          "maximum": 200000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lux"
+    },
+    "distance_mm": {
+      "anyOf": [
+        {
+          "maximum": 10000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Distance Mm"
+    },
+    "trigger": {
+      "default": false,
+      "title": "Trigger",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "device_id",
+    "boot_id",
+    "seq",
+    "t_us",
+    "schema_version"
+  ],
+  "title": "SensorReading",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

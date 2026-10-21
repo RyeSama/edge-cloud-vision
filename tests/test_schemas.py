@@ -16,6 +16,7 @@ SCHEMA = json.loads((ROOT / "contracts" / "event.schema.json").read_text(encodin
 MEMORY_QUERY_SCHEMA = json.loads(
     (ROOT / "contracts" / "memory-query.schema.json").read_text(encoding="utf-8")
 )
+SENSOR_SCHEMA = json.loads((ROOT / "contracts" / "sensor.schema.json").read_text(encoding="utf-8"))
 
 
 def test_generated_schema_matches_runtime_payload():
@@ -41,3 +42,24 @@ def test_memory_query_schema_accepts_a_question_and_rejects_extras():
     payload["image_b64"] = "AAAA"
     with pytest.raises(ValidationError):
         Draft202012Validator(MEMORY_QUERY_SCHEMA).validate(payload)
+
+
+def test_sensor_schema_requires_identity_and_monotonic_stamp():
+    payload = {
+        "schema_version": "1.0",
+        "kind": "sensor",
+        "device_id": "esp32-01",
+        "boot_id": "a1b2c3d4",
+        "seq": 1,
+        "t_us": 100000,
+        "lux": 512.3,
+        "distance_mm": 803.0,
+        "trigger": False,
+    }
+    Draft202012Validator(SENSOR_SCHEMA).validate(payload)
+    assert {"schema_version", "device_id", "boot_id", "seq", "t_us"} <= set(
+        SENSOR_SCHEMA["required"]
+    )
+    payload["image_b64"] = "AAAA"
+    with pytest.raises(ValidationError):
+        Draft202012Validator(SENSOR_SCHEMA).validate(payload)

@@ -1,9 +1,12 @@
 # 文档索引
 
-建议按下面的顺序读。只想跑起来，直接看根目录 [README](../README.md) 的“快速开始”。
+建议按下面的顺序读。只想跑起来，直接看根目录 [README](../README.md) 的“先选一条路”。
 
 | 文档 | 回答什么问题 |
 |---|---|
+| [../README.md](../README.md) | 第一次跑：纯软件、摄像头、ESP32 三条路线，上位机显示什么，代码分别跑在哪 |
+| [serial-protocol.md](serial-protocol.md) | 板子到 PC 的串口 JSON：115200 8N1、字段、序号、重启、错误处理 |
+| [../firmware/esp32_sensor/README.md](../firmware/esp32_sensor/README.md) | ESP32 接线、Arduino IDE 烧录、BH1750/HC-SR04、常见问题 |
 | [architecture.md](architecture.md) | 模块怎么分层？线程/异步模型是什么？故障时会发生什么？怎么迁到 C++/MCU？ |
 | [edge-mem.md](edge-mem.md) | v0.2 的时间衰减、SQLite/向量混合存储、RRF 检索、Token 预算和降级 |
 | [instrumentation.md](instrumentation.md) | v0.3 的采样时钟、延迟/抖动/截止期、标定与 conformal、Modbus 联锁、激励台、SPC、事件时间 |
@@ -25,6 +28,7 @@
 6. **测量结论必须带口径。** 延迟区分 capture→emit 与 capture→publish；置信度只有经过标定才称为概率；时间戳区分 `synced/unsynced`；控制输出必须经过联锁，不能把模型结果直接当执行信号。
 7. **分条件验收必须有预算。** 每个条件单独选 accept 门限时，必须同时报告 coverage、selective accuracy 和 false-accept；样本不足 `min_samples` 时回退全局默认，不硬拟合。
 8. **毫米数字必须带平面假设和不确定度。** v0.5 只测与棋盘格共面的距离；合成验证不能冒充真实精度；没有 U(k=2) 和对照基准的“0.07 mm”不算测量结果。
+9. **板子只做采样，不跑视觉。** 串口协议是 NDJSON；板子只发自己的单调 `t_us`，不伪造 Unix 时间；PC 负责 wall clock、序号跟踪和校验。
 
 ## 复现实验
 
@@ -77,6 +81,14 @@ python scripts/calibrate_camera.py --images "data/calib/*.jpg" \
   --cols 9 --rows 6 --square-mm 25 --out data/camera.json
 python scripts/measure_checkerboard.py --camera data/camera.json \
   --image data/measure/scene.jpg --a 412,308 --b 690,312
+
+# 9) 串口回放（不需要板子）和真实串口
+python scripts/serial_monitor.py --replay docs/examples/serial-lines.jsonl
+python scripts/serial_monitor.py --port COM5 --baud 115200
+
+# 10) 浏览器上位机
+python -m ecvision.cloud
+# 打开 http://127.0.0.1:8000/dashboard
 ```
 
 ## 已知限制

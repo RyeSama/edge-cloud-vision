@@ -14,8 +14,9 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
+from ecvision.cloud.dashboard import DASHBOARD_HTML
 from ecvision.cloud.decision import CloudDecisionService
 from ecvision.cloud.settings import CloudSettings
 from ecvision.cloud.store import EventStore
@@ -152,7 +153,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Edge-Cloud Vision Gateway",
-    version="0.5.0",
+    version="0.6.0",
     description="Receives edge JSON events, escalates low-confidence cases to an LLM, degrades safely.",
     lifespan=lifespan,
 )
@@ -160,7 +161,18 @@ app = FastAPI(
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"service": "edge-cloud-vision", "docs": "/docs", "health": "/healthz"}
+    return {
+        "service": "edge-cloud-vision",
+        "dashboard": "/dashboard",
+        "docs": "/docs",
+        "health": "/healthz",
+    }
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard() -> str:
+    """Browser HMI for a first run; no build step, no external assets."""
+    return DASHBOARD_HTML
 
 
 @app.get("/healthz")
