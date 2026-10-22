@@ -32,3 +32,8 @@ metrics.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Research raw data (images, manifests); keep the protocol and results
+research/data/raw/
+research/data/*.csv
+!research/data/manifest-template.csv

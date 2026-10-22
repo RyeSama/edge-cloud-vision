@@ -4,11 +4,13 @@
 
 它不是一个识别精度排行榜项目，也不是工业产品。它更适合拿来学习或做课程设计：看清楚采集、推理、门限、通信、云端兜底、测量和时间戳是怎么接起来的。
 
-当前版本 v0.6.0。
+当前版本 v0.6.2。
+
+v0.6.1 给标定脚本加了 `beta` 参数（小标定集下的三参数校准），给门限拟合加了 `--risk-control wilson`（用单侧置信上界而不是观测 FAR 对照预算）。v0.6.2 是收口版本：保留这些标定/风险控制，修掉 Windows 串口回放的 UTF-8 BOM 兼容问题，并把端到端 smoke 记录写进文档。没有改运行时识别逻辑。
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-80%20passed-brightgreen.svg)](tests)
-[![Release](https://img.shields.io/badge/release-v0.6.0-blue.svg)](https://github.com/RyeSama/edge-cloud-vision/releases)
+[![Tests](https://img.shields.io/badge/tests-95%20passed-brightgreen.svg)](tests)
+[![Release](https://img.shields.io/badge/release-v0.6.2-blue.svg)](https://github.com/RyeSama/edge-cloud-vision/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -23,6 +25,8 @@
 | v0.4 | 让门限可验收 | 温度标定、按 false-accept 预算分条件选 accept 门限、独立测试集 |
 | v0.5 | 从“识别”走到“测量” | 棋盘格标定、平面位姿、像素→毫米、蒙特卡洛不确定度、Gauge R&R |
 | v0.6 | 让第一次做毕设的人能照着跑 | 串口 NDJSON、ESP32 固件、`serial_monitor`、`/dashboard` 上位机、80 个测试 |
+| v0.6.1 | 把标定和风险控制补稳 | `beta` 标定、`--risk-control wilson` 有限样本上界、95 个测试 |
+| v0.6.2 | 收口串口和全链路 | 串口回放兼容 UTF-8 BOM、端到端 smoke 记录、95 个测试 |
 
 v0.5.0 的重点不是多一个功能，而是把“图里有什么”变成“两个点之间多少毫米、这个数有多不确定”。它只适用于与棋盘格共面的目标；合成验证不能当真实镜头精度。
 
@@ -404,7 +408,7 @@ edge-cloud-vision/
 ├─ examples/minimal_loop.py # 一屏版端侧骨架
 ├─ contracts/               # JSON Schema
 ├─ docs/                    # 协议、架构、串口、测量、实测数据
-├─ tests/                   # 80 个测试
+├─ tests/                   # 95 个测试
 ├─ docker-compose.yml
 └─ pyproject.toml
 ```
@@ -419,7 +423,7 @@ ruff check src tests scripts
 python -m compileall -q src tests
 ```
 
-当前 80 个测试，覆盖门限边界、契约、预处理、管线、云端降级、API 幂等、Edge-Mem 时间窗/RRF/Token 截断、时钟偏移、ECE/Brier、conformal、SPC、Modbus 往返、联锁、事件时间、激励台、相机标定、平面测量、不确定度、Gauge R&R、串口解析和上位机页面。GitHub Actions 在 Python 3.10 和 3.12 上跑 `ruff check` 和 `pytest -q`。
+当前 95 个测试，覆盖门限边界、契约、预处理、管线、云端降级、API 幂等、Edge-Mem 时间窗/RRF/Token 截断、时钟偏移、ECE/Brier、conformal、SPC、Modbus 往返、联锁、事件时间、激励台、相机标定、平面测量、不确定度、Gauge R&R、串口解析和上位机页面。GitHub Actions 在 Python 3.10 和 3.12 上跑 `ruff check` 和 `pytest -q`。
 
 ---
 

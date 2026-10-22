@@ -6,6 +6,7 @@ import pytest
 
 from ecvision.edge.classifier import Candidate
 from ecvision.edge.gate import GateConfig
+from ecvision.instrument.acceptance import select_threshold
 from ecvision.instrument.calibration import (
     CalibrationGate,
     CalibrationPoint,
@@ -13,6 +14,8 @@ from ecvision.instrument.calibration import (
     ConformalProfile,
     brier_score,
     expected_calibration_error,
+    fit_beta,
+    fit_calibration,
     fit_isotonic,
     prediction_set,
     reliability_bins,
@@ -73,6 +76,38 @@ def test_isotonic_profile_is_monotone() -> None:
     assert profile.x == sorted(profile.x)
     assert all(a <= b for a, b in zip(profile.y, profile.y[1:], strict=False))
     assert 0.0 <= profile.apply(0.5) <= 1.0
+
+
+def test_beta_calibration_fixes_overconfidence() -> None:
+    import random
+
+    rng = random.Random(7)
+    points = []
+    for _ in range(60):
+        confidence = rng.uniform(0.50, 0.99)
+        probability = min(0.99, 0.1 + 1.2 * (confidence - 0.50))
+        points.append(CalibrationPoint(confidence=confidence, correct=rng.random() < probability))
+    profile = fit_beta(points, dataset_id="unit")
+    assert profile.method == "beta"
+    assert profile.beta_a > 0 and profile.beta_b > 0
+    assert profile.apply(0.90) < 0.90
+    assert profile.nll < 0.80
+    assert fit_calibration(points, method="beta").method == "beta"
+
+
+def test_wilson_risk_control_is_conservative_on_small_samples() -> None:
+    confidences = [0.99] * 99 + [0.10]
+    correct = [True] * 99 + [False]
+    empirical = select_threshold(
+        confidences, correct, false_accept_budget=0.02, risk_control="empirical"
+    )
+    controlled = select_threshold(
+        confidences, correct, false_accept_budget=0.02, risk_control="wilson"
+    )
+    assert empirical.coverage > 0.0
+    assert controlled.coverage <= empirical.coverage
+    assert controlled.false_accept_upper is not None
+    assert controlled.false_accept_upper > 0.02
 
 
 def test_conformal_set_size_controls_acceptance() -> None:

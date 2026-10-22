@@ -12,6 +12,7 @@ from ecvision.transport.serial_json import (
     SerialParseError,
     iter_sensor_lines,
     parse_sensor_line,
+    read_replay,
 )
 
 
@@ -77,3 +78,10 @@ def test_sequence_tracker_detects_gap_duplicate_and_reboot():
     assert tracker.gaps == 2
     assert tracker.duplicates == 1
     assert tracker.reboots == 1
+
+
+def test_read_replay_tolerates_utf8_bom(tmp_path):
+    path = tmp_path / "sensor.ndjson"
+    path.write_bytes(b"\xef\xbb\xbf" + _line(seq=42).encode("utf-8") + b"\n")
+    readings = list(read_replay(path))
+    assert [reading.seq for reading in readings] == [42]

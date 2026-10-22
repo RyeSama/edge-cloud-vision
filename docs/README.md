@@ -29,6 +29,7 @@
 7. **分条件验收必须有预算。** 每个条件单独选 accept 门限时，必须同时报告 coverage、selective accuracy 和 false-accept；样本不足 `min_samples` 时回退全局默认，不硬拟合。
 8. **毫米数字必须带平面假设和不确定度。** v0.5 只测与棋盘格共面的距离；合成验证不能冒充真实精度；没有 U(k=2) 和对照基准的“0.07 mm”不算测量结果。
 9. **板子只做采样，不跑视觉。** 串口协议是 NDJSON；板子只发自己的单调 `t_us`，不伪造 Unix 时间；PC 负责 wall clock、序号跟踪和校验。
+10. **小样本不能证明小风险。** `--risk-control wilson` 用单侧置信上界对照预算；40 条 0 误接受并不意味着 2% FAR 已被证明。论文/报告必须写样本量和区间。
 
 ## 复现实验
 
@@ -72,6 +73,15 @@ python scripts/fit_policy.py --input data/cal-temp/predictions.csv \
 python scripts/eval_dataset.py --manifest data/manifest-test.csv --out-dir data/test-policy \
   --calibration-profile data/calibration-v04.json \
   --policy data/acceptance-policy-v04.json
+
+# 7b) v0.6.2 可选：beta 标定 + Wilson 风险控制
+python scripts/fit_calibration.py --input data/cal-raw/predictions.csv \
+  --method beta --out data/calibration-v061.json
+python scripts/eval_dataset.py --manifest data/manifest-cal.csv --out-dir data/cal-beta \
+  --calibration-profile data/calibration-v061.json
+python scripts/fit_policy.py --input data/cal-beta/predictions.csv \
+  --false-accept-budget 0.02 --risk-control wilson --delta 0.05 \
+  --min-samples 20 --out data/acceptance-policy-v061.json
 
 # 8) v0.5 平面测量：合成验证一次跑完（标定、测距、不确定度、Gauge）
 python scripts/metrology_demo.py --out docs/measurements/v0.5

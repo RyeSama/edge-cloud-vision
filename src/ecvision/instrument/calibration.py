@@ -56,8 +56,11 @@ class CalibrationProfile(StrictModel):
     """
 
     version: str = Field(default="cal-v1", min_length=1, max_length=64)
-    method: Literal["identity", "isotonic", "temperature"] = "identity"
+    method: Literal["identity", "isotonic", "temperature", "beta"] = "identity"
     temperature: float = Field(default=1.0, gt=0.0, le=20.0)
+    beta_a: float = Field(default=0.0, ge=0.0, le=50.0)
+    beta_b: float = Field(default=0.0, ge=0.0, le=50.0)
+    beta_c: float = Field(default=0.0, ge=-20.0, le=20.0)
     x: list[float] = Field(default_factory=list, max_length=256)
     y: list[float] = Field(default_factory=list, max_length=256)
     ece: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -78,8 +81,10 @@ class CalibrationProfile(StrictModel):
             raise ValueError("calibration x values must be strictly increasing")
         if any(b < a for a, b in zip(self.y, self.y[1:], strict=False)):
             raise ValueError("isotonic y values must be non-decreasing")
-        if self.method == "temperature" and self.x:
-            raise ValueError("temperature profiles must not carry an isotonic curve")
+        if self.method in ("temperature", "beta") and self.x:
+            raise ValueError("temperature/beta profiles must not carry an isotonic curve")
+        if self.method == "beta" and (self.beta_a <= 0.0 or self.beta_b <= 0.0):
+            raise ValueError("beta calibration requires positive beta_a and beta_b")
         return self
 
     def apply(self, confidence: float) -> float:
@@ -87,6 +92,8 @@ class CalibrationProfile(StrictModel):
             raise ValueError("confidence must be in [0, 1]")
         if self.method == "temperature":
             return _temperature_scale(confidence, self.temperature)
+        if self.method == "beta":
+            return _beta_scale(confidence, self.beta_a, self.beta_b, self.beta_c)
         if self.method == "identity" or not self.x:
             return confidence
         if confidence <= self.x[0]:
@@ -197,6 +204,102 @@ def _temperature_scale(confidence: float, temperature: float) -> float:
     return _sigmoid(_logit(confidence) / temperature)
 
 
+def _beta_scale(confidence: float, beta_a: float, beta_b: float, beta_c: float) -> float:
+    """Beta calibration map from Kull et al. (AISTATS 2017).
+
+    ``p = sigmoid(a*log(s) - b*log(1-s) + c)``. With a=b it reduces to a
+    temperature-like logistic rescaling; the two separate slopes let it model
+    the common case where high scores are overconfident but low scores are not.
+    """
+    if beta_a <= 0.0 or beta_b <= 0.0:
+        raise ValueError("beta calibration requires positive a and b")
+    s = min(1.0 - 1e-9, max(1e-9, confidence))
+    value = beta_a * math.log(s) - beta_b * math.log(1.0 - s) + beta_c
+    return _sigmoid(value)
+
+
+def fit_beta(
+    points: Sequence[CalibrationPoint],
+    *,
+    dataset_id: str = "unknown",
+    bins: int = 10,
+    version: str = "cal-v1",
+    iterations: int = 3000,
+    learning_rate: float = 0.15,
+    l2: float = 1e-3,
+) -> CalibrationProfile:
+    """Fit a three-parameter beta calibration by gradient descent.
+
+    No scipy dependency. The objective is binary NLL with a small L2 term; the
+    two slope parameters are clamped positive so the map stays monotone. If the
+    fit degenerates, fall back to temperature scaling instead of emitting a
+    non-monotone calibration curve.
+    """
+    usable = [p for p in points if 0.0 <= p.confidence <= 1.0]
+    if len(usable) < 10:
+        return fit_temperature(points, dataset_id=dataset_id, bins=bins, version=version)
+
+    truth = [float(point.correct) for point in usable]
+    features = [
+        (
+            math.log(min(1.0 - 1e-9, max(1e-9, point.confidence))),
+            -math.log(1.0 - min(1.0 - 1e-9, max(1e-9, point.confidence))),
+        )
+        for point in usable
+    ]
+    n = len(usable)
+
+    # Standardize the two features before gradient descent; beta-calibration
+    # features have very different scales (log(s) near 0, -log(1-s) up to ~5),
+    # which makes an unnormalized fixed-step optimizer drift to a degenerate
+    # solution and silently fall back to temperature.
+    mean_1 = sum(feature[0] for feature in features) / n
+    mean_2 = sum(feature[1] for feature in features) / n
+    var_1 = sum((feature[0] - mean_1) ** 2 for feature in features) / n
+    var_2 = sum((feature[1] - mean_2) ** 2 for feature in features) / n
+    scale_1 = math.sqrt(var_1) or 1.0
+    scale_2 = math.sqrt(var_2) or 1.0
+    standardized = [
+        ((feature[0] - mean_1) / scale_1, (feature[1] - mean_2) / scale_2) for feature in features
+    ]
+
+    weight_1 = 0.0
+    weight_2 = 0.0
+    intercept = 0.0
+    for _ in range(iterations):
+        grad_1 = grad_2 = grad_c = 0.0
+        for (x_1, x_2), target in zip(standardized, truth, strict=False):
+            p = _sigmoid(weight_1 * x_1 + weight_2 * x_2 + intercept)
+            error = p - target
+            grad_1 += error * x_1
+            grad_2 += error * x_2
+            grad_c += error
+        weight_1 -= learning_rate * (grad_1 / n + l2 * weight_1)
+        weight_2 -= learning_rate * (grad_2 / n + l2 * weight_2)
+        intercept -= learning_rate * (grad_c / n + l2 * intercept)
+
+    beta_a = weight_1 / scale_1
+    beta_b = weight_2 / scale_2
+    beta_c = intercept - weight_1 * mean_1 / scale_1 - weight_2 * mean_2 / scale_2
+    if beta_a <= 1e-2 or beta_b <= 1e-2:
+        return fit_temperature(points, dataset_id=dataset_id, bins=bins, version=version)
+
+    calibrated = [_beta_scale(point.confidence, beta_a, beta_b, beta_c) for point in usable]
+    return CalibrationProfile(
+        version=version,
+        method="beta",
+        beta_a=round(beta_a, 6),
+        beta_b=round(beta_b, 6),
+        beta_c=round(beta_c, 6),
+        ece=expected_calibration_error(calibrated, truth, bins=bins),
+        brier=brier_score(calibrated, truth),
+        nll=negative_log_likelihood(calibrated, truth),
+        n=n,
+        bins=bins,
+        dataset_id=dataset_id,
+    )
+
+
 def fit_temperature(
     points: Sequence[CalibrationPoint],
     *,
@@ -255,9 +358,11 @@ def fit_calibration(
     bins: int = 10,
     version: str = "cal-v1",
 ) -> CalibrationProfile:
-    """Dispatch to isotonic or temperature calibration."""
+    """Dispatch to isotonic, temperature, or beta calibration."""
     if method == "temperature":
         return fit_temperature(points, dataset_id=dataset_id, bins=bins, version=version)
+    if method == "beta":
+        return fit_beta(points, dataset_id=dataset_id, bins=bins, version=version)
     if method == "isotonic":
         return fit_isotonic(points, dataset_id=dataset_id, bins=bins, version=version)
     if method == "identity":

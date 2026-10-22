@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+from statistics import NormalDist
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -40,6 +41,27 @@ def _wilson_lower(successes: int, total: int, z: float = 1.96) -> float:
     return max(0.0, (centre - margin) / denominator)
 
 
+def _wilson_upper(successes: int, total: int, *, delta: float = 0.05) -> float:
+    """One-sided Wilson upper bound for a binomial rate.
+
+    Used by the optional risk-controlled threshold: the observed false-accept
+    rate may look small on 40 rows, but the upper confidence bound is what the
+    acceptance budget should be compared against. This is an approximation to
+    the exact Clopper-Pearson bound; it is conservative enough for the small
+    calibration sets this project has, and it avoids a scipy dependency.
+    """
+    if total <= 0:
+        return 1.0
+    if not 0.0 < delta < 1.0:
+        raise ValueError("delta must be in (0, 1)")
+    z = NormalDist().inv_cdf(1.0 - delta)
+    p = successes / total
+    denominator = 1.0 + z * z / total
+    centre = p + z * z / (2.0 * total)
+    margin = z * math.sqrt((p * (1.0 - p) + z * z / (4.0 * total)) / total)
+    return min(1.0, max(0.0, (centre + margin) / denominator))
+
+
 class ConditionThreshold(StrictModel):
     condition: str = Field(default="default", min_length=1, max_length=64)
     accept_threshold: float = Field(ge=0.0, le=1.0)
@@ -47,6 +69,7 @@ class ConditionThreshold(StrictModel):
     n: int = Field(default=0, ge=0)
     coverage: float = Field(default=0.0, ge=0.0, le=1.0)
     false_accept_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    false_accept_upper: float | None = Field(default=None, ge=0.0, le=1.0)
     false_accept_among_accepted: float | None = Field(default=None, ge=0.0, le=1.0)
     selective_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
     source: Literal["fitted", "default", "fallback"] = "fitted"
@@ -65,10 +88,12 @@ class ConditionThreshold(StrictModel):
 
 
 class AcceptancePolicy(StrictModel):
-    version: str = Field(default="policy-v1", min_length=1, max_length=64)
+    version: str = Field(default="policy-v2", min_length=1, max_length=64)
     dataset_id: str = Field(default="unknown", min_length=1, max_length=200)
     calibration_profile_version: str | None = Field(default=None, max_length=64)
     false_accept_budget: float = Field(ge=0.0, le=1.0)
+    risk_control: Literal["empirical", "wilson"] = "empirical"
+    delta: float = Field(default=0.05, gt=0.0, lt=1.0)
     min_samples: int = Field(default=20, ge=1)
     default: ConditionThreshold
     conditions: dict[str, ConditionThreshold] = Field(default_factory=dict)
@@ -88,16 +113,27 @@ def select_threshold(
     condition: str = "default",
     false_accept_budget: float = 0.02,
     review_threshold: float = 0.5,
+    risk_control: Literal["empirical", "wilson"] = "empirical",
+    delta: float = 0.05,
 ) -> ConditionThreshold:
-    """Lowest threshold whose observed false-accept rate stays in budget.
+    """Lowest threshold whose false-accept rate stays within budget.
 
     Lowering a threshold can only add accepted samples, so the false-accept
     rate is monotonically non-decreasing as the threshold falls. We therefore
     walk candidates from high to low and stop at the first violation; the last
     valid candidate is the maximum-coverage policy under the budget.
+
+    ``risk_control="wilson"`` compares the one-sided Wilson upper confidence
+    bound of the false-accept rate, not the observed rate. This is the
+    finite-sample, conservative variant used by v0.6.1; it will choose a higher
+    threshold (or fall back) when the calibration set cannot prove the budget.
     """
     if not 0.0 <= false_accept_budget <= 1.0:
         raise ValueError("false_accept_budget must be in [0, 1]")
+    if risk_control not in ("empirical", "wilson"):
+        raise ValueError(f"unknown risk_control: {risk_control}")
+    if not 0.0 < delta < 1.0:
+        raise ValueError("delta must be in (0, 1)")
     pairs = [(float(c), bool(y)) for c, y in zip(confidences, correct, strict=False)]
     if not pairs:
         raise ValueError("at least one calibration point is required")
@@ -111,7 +147,11 @@ def select_threshold(
         accepted = [(c, y) for c, y in pairs if c >= threshold]
         false_accepts = sum(1 for _c, y in accepted if not y)
         far = false_accepts / total
-        if far <= false_accept_budget:
+        upper = (
+            _wilson_upper(false_accepts, total, delta=delta) if risk_control == "wilson" else None
+        )
+        risk = upper if upper is not None else far
+        if risk <= false_accept_budget:
             correct_accepted = sum(1 for _c, y in accepted if y)
             best = ConditionThreshold(
                 condition=condition,
@@ -120,6 +160,7 @@ def select_threshold(
                 n=total,
                 coverage=len(accepted) / total,
                 false_accept_rate=far,
+                false_accept_upper=upper,
                 false_accept_among_accepted=(false_accepts / len(accepted)) if accepted else None,
                 selective_accuracy=(correct_accepted / len(accepted)) if accepted else None,
                 source="fitted",
@@ -135,6 +176,9 @@ def select_threshold(
             n=total,
             coverage=0.0,
             false_accept_rate=0.0,
+            false_accept_upper=_wilson_upper(0, total, delta=delta)
+            if risk_control == "wilson"
+            else None,
             source="fallback",
         )
     return best
@@ -144,6 +188,8 @@ def fit_policy(
     records: Iterable[Mapping[str, object]],
     *,
     false_accept_budget: float = 0.02,
+    risk_control: Literal["empirical", "wilson"] = "empirical",
+    delta: float = 0.05,
     min_samples: int = 20,
     review_threshold: float = 0.5,
     condition_key: str = "condition",
@@ -185,6 +231,8 @@ def fit_policy(
         condition="default",
         false_accept_budget=false_accept_budget,
         review_threshold=review_threshold,
+        risk_control=risk_control,
+        delta=delta,
     )
     default = default.model_copy(update={"source": "default"})
 
@@ -207,6 +255,8 @@ def fit_policy(
             condition=condition,
             false_accept_budget=false_accept_budget,
             review_threshold=review_threshold,
+            risk_control=risk_control,
+            delta=delta,
         )
         if threshold.source == "fallback":
             notes.append(
@@ -220,6 +270,8 @@ def fit_policy(
         dataset_id=dataset_id,
         calibration_profile_version=calibration_profile_version,
         false_accept_budget=false_accept_budget,
+        risk_control=risk_control,
+        delta=delta,
         min_samples=min_samples,
         default=default,
         conditions=conditions,
@@ -241,6 +293,7 @@ def policy_summary(policy: AcceptancePolicy) -> list[dict[str, object]]:
                 "n": threshold.n,
                 "coverage": threshold.coverage,
                 "false_accept_rate": threshold.false_accept_rate,
+                "false_accept_upper": threshold.false_accept_upper,
                 "false_accept_among_accepted": threshold.false_accept_among_accepted,
                 "selective_accuracy": threshold.selective_accuracy,
                 "wilson_lower_false_accept": _wilson_lower(

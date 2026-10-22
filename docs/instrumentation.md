@@ -3,7 +3,7 @@
 v0.3 不追求“更多识别类别”，而是把 v0.2 的视觉链路往**测量仪器**方向补：
 
 - 时间基准可解释：采集时间、发出时间、端到端延迟、抖动、截止期、丢帧；
-- 置信度可标定：ECE/Brier、温度/等渗回归、conformal prediction set；
+- 置信度可标定：ECE/Brier、beta/温度/等渗回归、conformal prediction set；
 - 输出可闭环：Modbus TCP 寄存器映射 + 去抖/保持/故障安全的联锁状态机；
 - 验证可复现：确定性激励矩阵、SPC 漂移监控、事件时间 watermark。
 
@@ -73,15 +73,25 @@ python -m ecvision.edge --source synthetic --max-frames 100 \
 
 原始 softmax 置信度不是概率。`CalibrationGate` 支持：
 
-1. `CalibrationProfile`：identity 或 isotonic 映射；
+1. `CalibrationProfile`：identity、isotonic、temperature 或 beta 映射；
 2. `ConformalProfile`：split-conformal 的 `qhat`，生成预测集合；
 3. 集合大小 > 1 直接判 `review`，即使 top-1 置信度很高。
+
+标定方法的选择：
+
+- `temperature`：单参数，最稳，适合先跑通；
+- `beta`：三参数 `sigmoid(a·log(s) − b·log(1−s) + c)`，能处理“高分段过度自信、低分段反而不自信”的不对称，适合小标定集；
+- `isotonic`：非参数、单调，但样本少时容易阶梯化，适合大标定集；
+- `identity`：基线，不做校准。
+
+`beta` 来自 Kull et al., *Beta calibration: a well-founded and easily implemented improvement on logistic calibration for binary classifiers*, AISTATS 2017。这里把它用于“top-1 是否正确”的二分类置信度，不是重新做 1000 类 softmax。
 
 拟合脚本：
 
 ```bash
 python scripts/fit_calibration.py \
   --input data/calibration.jsonl \
+  --method beta \
   --out data/calibration.json \
   --conformal-out data/conformal.json \
   --alpha 0.1
@@ -134,6 +144,16 @@ python scripts/eval_dataset.py --manifest data/manifest-test.csv --out-dir data/
 ```
 
 `select_threshold` 从高到低扫描候选门限，保留“观测 false-accept ≤ 预算”的最低门限；样本数小于 `min_samples` 的条件回退全局默认，并在 policy `notes` 里说明。报告同时给 coverage、selective accuracy、false-accept 和 ECE，不允许只报 accuracy。
+
+v0.6.2 保留了可选的有限样本风险控制：
+
+```bash
+python scripts/fit_policy.py --input data/cal-temp/predictions.csv \
+  --false-accept-budget 0.02 --risk-control wilson --delta 0.05 \
+  --min-samples 20 --out data/acceptance-policy-v061.json
+```
+
+`risk-control=wilson` 不再比较观测 FAR，而是比较单侧 Wilson 上界与预算。40 个样本里 0 个误接受，观测 FAR 是 0%，但 95% 上界约 7%，所以不会假装“2% 预算已被证明”。这是保守的工程选择，不是精确 Clopper-Pearson 保证；论文里应写明近似和样本量。完整流程见 [`measurements/v0.4/README.md`](measurements/v0.4/README.md)，v0.6.2 的差异主要在 `fit_calibration.py --method beta` 和 `fit_policy.py --risk-control/--delta`。
 
 本仓库的 85 张公开图结果：每条件 8 张标定 / 9 张测试，温度 `T=3.22`；测试集 coverage 28.9% → 35.6%，selective accuracy 100% → 93.8%，false accept 0% → 2.2%。完整数据见 [`measurements/v0.4/README.md`](measurements/v0.4/README.md)。
 
@@ -261,3 +281,14 @@ pytest -q tests/test_event_time.py
 | 闭环控制 | 联锁状态机、去抖、保持、fail-safe |
 | 数据处理 | SPC（EWMA/CUSUM）、漂移告警 |
 | 测试技术 | 确定性激励矩阵、重复性、p50/p95/p99 |
+
+## 9. 参考
+
+- ISO/IEC Guide 98-4:2012, *Uncertainty of measurement — Part 4: Role of measurement uncertainty in conformity assessment*.
+- ISO 14253-1:2017, *Geometrical product specifications (GPS) — Inspection by measurement of workpieces and measuring equipment — Part 1: Decision rules for verifying conformity or nonconformity with specifications*.
+- JCGM 101:2008, *Evaluation of measurement data — Supplement 1 to the GUM — Propagation of distributions using a Monte Carlo method*.
+- Kull, M., Silva Filho, T. M., & Flach, P. (2017). Beta calibration: a well-founded and easily implemented improvement on logistic calibration for binary classifiers. AISTATS.
+- Vovk, V., Gammerman, A., & Shafer, G. (2005). *Algorithmic Learning in a Random World*. Springer. (split conformal / Mondrian conformal)
+- Angelopoulos, A. N., Bates, S., Candès, E. J., Jordan, M. I., & Lei, L. (2021). Learn then test: Calibrating predictive algorithms to achieve risk control. arXiv:2110.01052.
+- Angelopoulos, A. N., Bates, S., Fisch, A., Lei, L., & Schuster, T. (2022). Conformal risk control. arXiv:2208.02814.
+

@@ -99,6 +99,8 @@ for reading in iter_sensor_lines(iter_serial("COM5", baud=115200)):
 python scripts/serial_monitor.py --replay docs/examples/serial-lines.jsonl
 ```
 
+Windows 上用 `Set-Content -Encoding utf8` 生成的 `.ndjson` 会带 UTF-8 BOM。回放读取按 `utf-8-sig` 处理，BOM 不会让第一行变成解析错误；真实串口流本身没有 BOM。
+
 ## 5. 序号、重启和迟到
 
 `SensorSequenceTracker` 做三件事：

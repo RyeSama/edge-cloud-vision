@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.replay:
         if not args.replay.exists():
             parser.error(f"replay file not found: {args.replay}")
-        lines = args.replay.read_text(encoding="utf-8").splitlines()
+        lines = args.replay.read_text(encoding="utf-8-sig").splitlines()
         readings = iter_sensor_lines(lines, on_error=on_error)
         source_label = str(args.replay)
     else:

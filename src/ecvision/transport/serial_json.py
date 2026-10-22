@@ -75,7 +75,7 @@ def iter_sensor_lines(
 
 def read_replay(path: str | Path) -> Iterator[SensorReading]:
     """Replay a captured NDJSON file without hardware or pyserial."""
-    with Path(path).open("r", encoding="utf-8") as handle:
+    with Path(path).open("r", encoding="utf-8-sig") as handle:
         yield from iter_sensor_lines(handle)
 
 

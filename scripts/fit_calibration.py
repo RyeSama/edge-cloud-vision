@@ -68,9 +68,9 @@ def main() -> int:
     parser.add_argument("--alpha", type=float, default=0.1)
     parser.add_argument(
         "--method",
-        choices=("isotonic", "temperature", "identity"),
+        choices=("isotonic", "temperature", "beta", "identity"),
         default="isotonic",
-        help="isotonic for a non-monotone curve, temperature for a single-parameter baseline",
+        help="isotonic for large sets, temperature for a one-parameter baseline, beta for a small-set parametric fit",
     )
     parser.add_argument("--dataset-id", default="local-calibration")
     args = parser.parse_args()
@@ -102,6 +102,7 @@ def main() -> int:
                 "n": profile.n,
                 "method": profile.method,
                 "temperature": profile.temperature,
+                "beta": [profile.beta_a, profile.beta_b, profile.beta_c],
                 "ece": profile.ece,
                 "brier": profile.brier,
                 "nll": profile.nll,

@@ -127,3 +127,27 @@ python scripts/bench_stimulus.py --out docs/measurements/stimulus.md
 | Gauge GRR / 1 mm 公差 | 0.0230 mm / 13.79% |
 
 误差 RMS 小于 U，说明区间是保守的；这不能读成“精度 0.07 mm”。真实精度要用卡尺/量块/三坐标对照。
+
+## v0.6.2 全链路 smoke
+
+本机 Windows 11、Python 3.12.10、Mosquitto 2.0.15 本地 broker、无 LLM Key。端侧合成源 10 帧：
+
+```bash
+python -m ecvision.edge --source synthetic --max-frames 10 \
+  --mqtt-host 127.0.0.1 --mqtt-port 1883 \
+  --metrics-out data/e2e-metrics.json
+```
+
+| 指标 | 数值 |
+|---|---:|
+| 发布 / 丢弃 | 10 / 0 |
+| JSON 总字节 | 11,059 B |
+| 延迟 p50 / p95 | 10.855 / 19.598 ms |
+| 截止期错失 | 0 |
+| 门控 | 10 条全部 review（合成画面是分布外输入） |
+| 云端接收 / 存储 | 10 / 10 |
+| 云端 review / fallback / LLM | 10 / 10 / 0 |
+| Edge-Mem 事件 / 向量 | 10 / 10 |
+| 检索 | 3 条返回，10 个候选，1.155 ms |
+
+这是链路连通性验证，不是识别精度或吞吐结论。`/dashboard` 返回 200；无 LLM 时 `/api/v1/memory/ask` 返回 `mode=json_timeline`、`answer=null`，符合降级设计。

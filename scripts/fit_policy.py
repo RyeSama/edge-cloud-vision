@@ -33,6 +33,13 @@ def main() -> int:
     parser.add_argument("--input", type=Path, required=True, help="calibration predictions.csv")
     parser.add_argument("--out", type=Path, default=ROOT / "data" / "acceptance-policy.json")
     parser.add_argument("--false-accept-budget", type=float, default=0.02)
+    parser.add_argument(
+        "--risk-control",
+        choices=("empirical", "wilson"),
+        default="empirical",
+        help="empirical FAR, or the one-sided Wilson upper bound (v0.6.1)",
+    )
+    parser.add_argument("--delta", type=float, default=0.05)
     parser.add_argument("--min-samples", type=int, default=20)
     parser.add_argument("--condition-column", default="degradation")
     parser.add_argument(
@@ -48,6 +55,8 @@ def main() -> int:
         parser.error("--min-samples must be >= 1")
     if not 0.0 <= args.false_accept_budget <= 1.0:
         parser.error("--false-accept-budget must be in [0, 1]")
+    if not 0.0 < args.delta < 1.0:
+        parser.error("--delta must be in (0, 1)")
 
     with args.input.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -76,6 +85,8 @@ def main() -> int:
     policy = fit_policy(
         records,
         false_accept_budget=args.false_accept_budget,
+        risk_control=args.risk_control,
+        delta=args.delta,
         min_samples=args.min_samples,
         condition_key="condition",
         dataset_id=args.dataset_id,
@@ -90,6 +101,8 @@ def main() -> int:
                 "dataset_id": policy.dataset_id,
                 "n": policy.default.n,
                 "false_accept_budget": policy.false_accept_budget,
+                "risk_control": policy.risk_control,
+                "delta": policy.delta,
                 "min_samples": policy.min_samples,
                 "conditions": [row["condition"] for row in policy_summary(policy)],
                 "notes": policy.notes,
